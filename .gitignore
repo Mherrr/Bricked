@@ -7,3 +7,6 @@ dist/
 .vite/
 *.pt
 .pytest_cache/
+.vscode/
+.idea/
+.DS_Store
