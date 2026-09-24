@@ -1,0 +1,309 @@
+# Bricked — Benchmarks, Achievements and Accomplishments
+
+> Every number here is measured by the scripts in `benchmark/` against the code on
+> `master` (2026-09-24). "Before" is the same harness run on the code as it stood before
+> the benchmark-driven pass; raw JSON is in `benchmark/results/` (`orig*` = before,
+> `new*` = after). Architecture details are in [`BRICKED_OVERVIEW.md`](BRICKED_OVERVIEW.md).
+
+---
+
+## Headline numbers
+
+| Metric | Before | After | Change |
+|---|---|---|---|
+| Photos segmented successfully | 72% | 100% | +28 pts |
+| Segmentation mask IoU | 0.779 | 0.983 | +26% |
+| 3D reconstruction IoU (carved hull) | 0.398 | 0.689 | +73% |
+| 3D IoU of final voxel model | 0.374 | 0.616 | +65% |
+| Objects reconstructed (of 19) | 18 | 19 | failures eliminated |
+| Objects with hull IoU ≥ 0.6 (of 19) | 3 | 15 | 5× |
+| Upload → finished model, via API | 72.6 s | 8.7 s | 8.3× faster |
+| Slowest run, via API | 139.6 s | 11.8 s | 11.9× faster |
+| Pipeline compute per model | 43.2 s | 9.1 s | 4.7× faster |
+| Point cloud stored per run | 541 MB | 6.3 MB | 86× smaller |
+| Points stored per run | 5.0 M | 90 k | 56× fewer |
+| `GET /pointcloud` latency | 10.5 s | 0.20 s | 52× faster |
+| `GET /model` payload | 318 kB | 103 kB | 3.1× smaller |
+| Studs per brick | 3.12 | 3.97 | +27% |
+| Bricks bonded to ≥ 2 bricks below | 38% | 69% | +31 pts |
+| Colour error ΔE (visible surface) | 20.2 | 17.2 | −15% |
+| Unit tests | 0 | 12 | — |
+
+---
+
+## Method
+
+- **Dataset:** 19 textured 3D models from the
+  [Khronos glTF sample assets](https://github.com/KhronosGroup/glTF-Sample-Assets):
+  AntiqueCamera, Avocado, BarramundiFish, BoomBox, CesiumMilkTruck, ChairDamaskPurplegold,
+  ChronographWatch, CommercialRefrigerator, DamagedHelmet, Duck, Fox, GlamVelvetSofa,
+  Lantern, MaterialsVariantsShoe, PotOfCoals, SheenChair, SheenWoodLeatherSofa,
+  SpecularSilkPouf, WaterBottle. (ToyCar was excluded: its draped cloth can't be solid-filled
+  into reliable ground truth.)
+- **Captures:** rendered headlessly (pyrender + OSMesa) as turntable photos matching the
+  backend's camera model — 960×720 JPEG, studio backdrop with a lighting gradient, vignette,
+  random per-shot tint and Gaussian sensor noise. Two capture sets: **8 photos** (one ring,
+  152 photos total) and **16 photos** (8 level + 8 from 45° above, 304 photos total).
+- **Ground truth:** per-photo foreground masks from the renderer's depth buffer, and a 64³
+  solid occupancy grid per model (surface rasterized, closed, floor-sealed, flood-filled).
+- **Metrics:**
+  - Segmentation: pass rate; mask IoU vs ground-truth mask.
+  - 3D IoU: prediction and ground truth each normalized to their bounding box and compared
+    on a 64³ grid (hull shell filled before scoring; voxel cells scaled to 1.2:1 brick height).
+  - Studs per brick = voxels ÷ bricks. Bonded share = of bricks resting on something, the
+    share spanning ≥ 2 distinct bricks below. Largest connected build = share of bricks in
+    the biggest stud-connected assembly.
+  - Colour error: mean CIE76 ΔE between each visible voxel's colour and its brick's colour.
+  - Time: single-process CPU wall-clock on a 4-core cloud VM, no GPU.
+- **Harnesses:** `evaluate.py` calls the backend's stage functions directly;
+  `e2e_api.py` drives a live FastAPI + local MongoDB/GridFS server over HTTP.
+
+---
+
+## Results — 8-photo capture (19 objects, mean)
+
+| Metric | Before | After |
+|---|---|---|
+| Captures reconstructed | 18 / 19 | 19 / 19 |
+| Photos segmented | 72% | 100% |
+| Segmentation mask IoU | 0.779 | 0.983 |
+| 3D IoU — carved hull (mean) | 0.398 | 0.689 |
+| 3D IoU — carved hull (median) | 0.345 | 0.689 |
+| 3D IoU — final voxel model | 0.374 | 0.616 |
+| Voxels per model | 8,334 | 3,930 |
+| Bricks per model | 2,861 | 934 |
+| Studs per brick | 3.12 | 3.97 |
+| Bricks bonded to ≥ 2 below | 38% | 69% |
+| Bricks in largest connected build | 98.5% | 96.9% |
+| LEGO colours used | 4.1 | 5.4 |
+| Colour error ΔE (visible voxels) | 20.2 | 17.2 |
+| Segmentation time | 9.67 s | 4.86 s |
+| Reconstruction time | 11.08 s | 3.89 s |
+| Voxelization time | 22.21 s | 0.31 s |
+| Brick packing time | 0.25 s | 0.07 s |
+| Pipeline compute time | 43.22 s | 9.13 s |
+
+Stage speedups: segmentation 2.0×, reconstruction 2.8×, voxelization 72×, packing 3.6×.
+Brick counts are not strictly comparable (the old grid size depended on photo framing; the
+new one is fixed at 28 studs), so studs per brick is the fairer packing measure.
+
+## Results — 16-photo two-ring capture (19 objects, mean)
+
+| Metric | Before | After |
+|---|---|---|
+| Captures reconstructed | 19 / 19 | 19 / 19 |
+| Photos segmented | 72% | 100% |
+| Segmentation mask IoU | 0.827 | 0.983 |
+| 3D IoU — carved hull (mean) | 0.353 | 0.683 |
+| 3D IoU — carved hull (median) | 0.295 | 0.687 |
+| 3D IoU — final voxel model | 0.336 | 0.615 |
+| Bricks per model | 2,649 | 918 |
+| Studs per brick | 2.95 | 4.09 |
+| Bricks bonded to ≥ 2 below | 36% | 70% |
+| Bricks in largest connected build | 96.9% | 97.5% |
+| Colour error ΔE | 19.5 | 17.0 |
+| Pipeline compute time | 56.10 s | 14.91 s |
+
+## Results — end-to-end through the HTTP API (8 photos, 19 runs, mean)
+
+| Metric | Before | After |
+|---|---|---|
+| Runs completed | 18 / 19 | 19 / 19 |
+| Upload request | 0.03 s | 0.02 s |
+| `POST /segment` | 9.4 s | 4.0 s |
+| `POST /reconstruct` | 32.6 s | 4.3 s |
+| `POST /voxelize` | 30.3 s | 0.33 s |
+| `POST /lego` | 0.29 s | 0.09 s |
+| Upload → finished model | 72.6 s | 8.7 s |
+| Point cloud in GridFS | 541 MB (5.0 M points) | 6.3 MB (90 k points) |
+| `GET /pointcloud` | 10.5 s, 765 kB | 0.20 s, 489 kB |
+| `GET /voxels` payload | 362 kB | 170 kB |
+| `GET /model` payload | 318 kB | 103 kB |
+
+API-level reconstruction and voxelization speedups (7.6× and 92×) are larger than in the
+direct-call benchmark because the old code also serialized and re-parsed a ~541 MB JSON
+point cloud through GridFS between those stages.
+
+## Per-object results (8 photos)
+
+| Object | Photos segmented (before → after) | Hull IoU (before → after) | Bricks (before → after) | API time, s (before → after) |
+|---|---|---|---|---|
+| AntiqueCamera | 50% → 100% | 0.04 → 0.74 | 6,541 → 484 | 139.6 → 6.6 |
+| Avocado | 88% → 100% | 0.59 → 0.85 | 1,292 → 1,015 | 39.9 → 9.1 |
+| BarramundiFish | 100% → 100% | 0.19 → 0.78 | 1,170 → 220 | 34.5 → 7.6 |
+| BoomBox | 62% → 100% | 0.70 → 0.54 | 5,298 → 2,039 | 135.6 → 9.6 |
+| CesiumMilkTruck | 75% → 100% | 0.37 → 0.78 | 4,515 → 947 | 100.0 → 8.8 |
+| ChairDamaskPurplegold | 88% → 100% | 0.31 → 0.64 | 2,445 → 1,161 | 57.5 → 8.7 |
+| ChronographWatch | 50% → 100% | 0.23 → 0.32 | 4,396 → 986 | 95.7 → 9.7 |
+| CommercialRefrigerator | 38% → 100% | 0.59 → 0.86 | 2,256 → 1,230 | 50.5 → 9.2 |
+| DamagedHelmet | 62% → 100% | 0.49 → 0.79 | 5,455 → 1,687 | 114.7 → 10.6 |
+| Duck | 100% → 100% | 0.67 → 0.68 | 2,137 → 1,239 | 79.5 → 9.5 |
+| Fox | 50% → 100% | 0.14 → 0.79 | 1,326 → 252 | 31.4 → 7.4 |
+| GlamVelvetSofa | 75% → 100% | 0.27 → 0.69 | 1,290 → 477 | 42.2 → 7.8 |
+| Lantern | 12% → 100% | failed → 0.67 | failed → 237 | failed → 6.7 |
+| MaterialsVariantsShoe | 38% → 100% | 0.17 → 0.48 | 1,275 → 458 | 30.9 → 7.7 |
+| PotOfCoals | 100% → 100% | 0.70 → 0.69 | 4,253 → 1,654 | 120.0 → 11.8 |
+| SheenChair | 100% → 100% | 0.32 → 0.63 | 2,589 → 1,069 | 51.9 → 9.0 |
+| SheenWoodLeatherSofa | 88% → 100% | 0.30 → 0.67 | 1,590 → 547 | 59.1 → 8.0 |
+| SpecularSilkPouf | 100% → 100% | 0.60 → 0.59 | 1,885 → 1,128 | 71.6 → 9.6 |
+| WaterBottle | 100% → 100% | 0.47 → 0.91 | 1,786 → 910 | 51.9 → 7.9 |
+
+Hull IoU improved on 16 of 19 objects (largest gains: AntiqueCamera +0.70, Fox +0.65,
+BarramundiFish +0.59). It fell on BoomBox (0.70 → 0.54) and was flat on PotOfCoals and
+SpecularSilkPouf. The one object the old pipeline could not reconstruct (Lantern) now
+reconstructs at 0.67.
+
+---
+
+## Ablations and tuning (what each decision was based on)
+
+**Silhouette normalization × camera convention** (perfect masks, 128³ grid, 20 objects,
+mean hull IoU):
+
+| Normalization | Old camera axes | Corrected camera axes |
+|---|---|---|
+| Per-view crop (original) | 0.424 | 0.480 |
+| Shared scale, per-view centre | 0.463 | 0.506 |
+| Shared crop window (chosen) | 0.440 | 0.530 |
+
+**Carving rule** (perfect masks, shared crop, corrected axes, mean hull IoU):
+
+| Thin-part opening | Vote threshold | Dilation | Mean IoU |
+|---|---|---|---|
+| 3 px (original) | 75% of views | 2 px | 0.530 |
+| 3 px | 100% | 2 px | 0.634 |
+| 0 px | 75% | 2 px | 0.540 |
+| 0 px (chosen) | 100% (chosen) | 2 px (chosen) | 0.673–0.676 |
+| 0 px | 100% | 0 px | 0.642 |
+
+**Segmenter** (160 photos, mean mask IoU vs ground truth; YOLO variants were measured on
+the first render set with a flat backdrop, the chosen segmenter on the final set with
+gradient, vignette and tint — the harder of the two):
+
+| Segmenter | Mask IoU | Photos with no detection |
+|---|---|---|
+| YOLO11x-seg + CLAHE/unsharp (original) | 0.559 | 41 / 160 |
+| YOLO11x-seg, full-res masks | 0.560 | 41 / 160 |
+| YOLO11x-seg, no pre-processing | 0.600 | 38 / 160 |
+| Backdrop model + GrabCut (chosen) | 0.983 | 0 / 160 |
+
+The backdrop segmenter runs ~0.54 s per photo on CPU and still hands cluttered-background
+photos to YOLO (verified on a synthetic clutter backdrop).
+
+**Voxel stage** (cached hulls, 19 objects; the σ and k-means rows were measured before
+stud sizing was added, the outlier-removal rows after):
+
+| Variant | Voxel IoU | Bricks | Bonded |
+|---|---|---|---|
+| With statistical outlier removal | 0.587 | 913 | 67.2% |
+| Without (chosen) | 0.616 | 936 | 68.8% |
+| Gaussian σ 0.2 → 0.5 / 0.8 | 0.604 → 0.604 / 0.596 | — | — |
+| k-means colours 6 → 8 / 10 | ΔE 17.05 → 16.65 / 16.33 | 1,207 → 1,245 / 1,270 | — |
+
+**Brick packer** (same voxels, 19 objects, mean):
+
+| Packer | Bricks | Studs per brick | Bonded to ≥ 2 below |
+|---|---|---|---|
+| Both orientations, alternating layers, colour-strict | 1,211 | 2.85 | 49.0% |
+| + bond weight 3.0, colour-strict | 1,211 | 2.85 | 51.3% |
+| + interior cells as colour wildcards, bond weight 0 | 848 | 3.96 | 63.6% |
+| + wildcards and bond weight 3.0 (chosen) | 851 | 3.96 | 67.9% |
+
+Interior wildcards alone removed 30% of bricks. (End-to-end, versus the original
+single-orientation packer: studs per brick 3.12 → 3.97, bonded 38% → 69%.)
+
+---
+
+## Performance engineering
+
+- **Early-exit carving:** each view projects only voxels still in the running; with strict
+  intersection most of the 16.7 M-voxel grid is eliminated after one or two views.
+  Reconstruction 11.1 s → 3.9 s (2.8×).
+- **Surface-only storage:** only the hull shell is serialized; the voxel stage re-fills it.
+  Point cloud 5.0 M → 90 k points, 541 MB → 6.3 MB per run.
+- **Voxelization 72× faster** (22.2 s → 0.31 s): no outlier removal on millions of points,
+  a far smaller input cloud, and a single distance-transform colour fill instead of
+  per-voxel neighbour search.
+- **Segmentation 2× faster** (9.7 s → 4.9 s per 8 photos): the backdrop model + GrabCut at
+  640 px avoids YOLO11x inference (and its low-confidence retry) on CPU for plain backdrops.
+
+---
+
+## Bugs found and fixed through the benchmark
+
+1. **YOLO-only segmentation** missed or rejected 28% of photos and gave partial masks → added
+   a class-agnostic backdrop segmenter; 100% pass rate, mask IoU 0.983.
+2. **Per-view silhouette rescaling** gave every view a different scale → one shared crop.
+3. **Camera basis inverted image *y*** relative to pixel coordinates → corrected axes.
+4. **Skipped photos shifted later bearings** → bearings from upload position.
+5. **Two-ring capture recommended by the UI was treated as one ring** → two-ring pose model.
+6. **`OPEN_ITERS = 0` eroded the entire voxel grid on every run** (SciPy treats
+   `iterations < 1` as "until stable"), silently falling back → opening skipped at 0.
+7. **Statistical outlier removal stripped real thin geometry** → removed.
+8. **Cubic voxels built models 20% too tall; model size depended on framing** →
+   1.2:1 brick-proportioned cells, fixed 28-stud span.
+9. **Brick packer:** single orientation, colour noise fragmenting hidden interiors, and
+   identical layer layouts forming vertical seams → both orientations, wildcard interiors,
+   bond-aware staggered layers.
+10. **`tlsCAFile` always passed**, forcing TLS so the documented default local MongoDB could
+    never connect → TLS only for TLS URIs.
+11. **Full solid hull stored as a 541 MB JSON point cloud per run** → surface-only storage.
+
+---
+
+## Achievements and accomplishments (source list for resume tailoring)
+
+**Project scope**
+- Built Bricked, a full-stack photo-to-LEGO pipeline (FastAPI, MongoDB/GridFS, Motor, OpenCV,
+  Open3D, SciPy, Ultralytics YOLO11, React 19, Vite, Tailwind, Three.js) that turns 8–16
+  photos of an object into a buildable brick model and parts list.
+- Implemented silhouette-based 3D reconstruction (visual hull / space carving over a 256³,
+  16.7 M-voxel grid) from first principles in NumPy — camera model, projection, analytic
+  focal length, chunked memory-bounded carving — with no calibration step.
+- Designed a 5-stage async pipeline with a MongoDB state machine (409 on out-of-order stages,
+  per-stage timestamps, failure capture) and GridFS storage for all binary/bulk artifacts.
+- Built three Three.js viewers (point cloud, voxels, bricks) using `InstancedMesh` so a
+  multi-hundred-brick model renders in one draw call, with leak-free WebGL teardown.
+
+**Accuracy**
+- Raised 3D reconstruction accuracy 73% (0.40 → 0.69 IoU) on a 19-object ground-truth
+  benchmark; objects above 0.6 IoU went from 3 to 15.
+- Designed a class-agnostic segmenter (quadratic CIE-LAB backdrop model + GrabCut, YOLO11
+  fallback) that raised photo acceptance from 72% to 100% and mask IoU from 0.78 to 0.98,
+  where YOLO had returned no detection at all on 26% of photos.
+- Fixed silhouette-scale, camera-axis and view-bearing bugs in the carver and added
+  two-ring (level + overhead) capture support; hull IoU on 16-photo captures 0.35 → 0.68.
+- Took end-to-end completion from 18/19 to 19/19 objects.
+
+**Performance**
+- Cut upload-to-model latency 8.3× (72.6 s → 8.7 s) and worst case 11.9× (139.6 s → 11.8 s)
+  on CPU.
+- Reduced per-run storage 86× (541 MB → 6.3 MB) with surface-only point clouds, and point-cloud
+  API latency 52× (10.5 s → 0.20 s).
+- Sped up voxelization 72× (22.2 s → 0.31 s) and reconstruction 2.8× via early-exit carving.
+
+**Buildability**
+- Rewrote the brick packer (both orientations, colour-wildcard interiors, bond-aware
+  staggered layers): 27% more studs per brick and bonded bricks up from 38% to 69%.
+- Made models physically proportioned (1.2:1 brick height) and consistently sized
+  (28-stud span); expanded the palette to 36 real LEGO colours, cutting colour error 15%.
+
+**Quality and tooling**
+- Built a benchmark suite: headless turntable renderer with exact ground truth, per-stage
+  evaluator (IoU, structure, colour, timing), HTTP end-to-end harness and before/after
+  reporting; used it to find and fix 11 defects and to tune 7 parameters by ablation.
+- Added 12 unit tests covering camera geometry, pose assignment, carving accuracy,
+  segmentation, voxelization and packing invariants.
+- Fixed a MongoDB TLS configuration bug that blocked all local-database deployments.
+
+---
+
+## Caveats
+
+- Captures are synthetic: they include backdrop gradients, vignetting, tint and noise, but
+  not lens distortion, cast shadows, motion blur or camera drift. Real-photo accuracy will be
+  lower.
+- Two-ring 16-photo captures now score about the same as 8-photo captures (0.683 vs 0.689
+  hull IoU), not higher.
+- Bricks in the largest connected build dipped slightly on 8-photo captures (98.5% → 96.9%).
+- Hull IoU regressed on one object (BoomBox, 0.70 → 0.54).
