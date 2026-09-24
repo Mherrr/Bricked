@@ -12,7 +12,9 @@ the browser with Three.js as the pipeline runs.
 
 On a 19-object ground-truth benchmark, the pipeline segments 100% of photos (mask IoU 0.98),
 reconstructs shapes at 0.69 3D IoU, and goes from upload to finished brick model in 8.7 s
-through the API — see [Benchmarks](#benchmarks).
+through the API — see [Benchmarks](#benchmarks),
+[`docs/BENCHMARK.md`](docs/BENCHMARK.md) for the full results and
+[`docs/BRICKED_OVERVIEW.md`](docs/BRICKED_OVERVIEW.md) for a technical deep dive.
 
 ---
 
