@@ -7,6 +7,8 @@ import "./styles.css";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 const MIN_IMAGES = 4;
 const MAX_IMAGES = 16;
+// A LEGO brick is 1.2× as tall as its stud pitch; voxels are sized to match
+const BRICK_HEIGHT = 1.2;
 
 function formatSize(bytes) {
   if (!bytes) return "0 KB";
@@ -145,8 +147,8 @@ function VoxelGridViewer({ voxels }) {
     const xMin = Math.min(...xs), xMax = Math.max(...xs);
     const yMin = Math.min(...ys), yMax = Math.max(...ys);
     const zMin = Math.min(...zs), zMax = Math.max(...zs);
-    const cx = (xMin + xMax) / 2, cy = (yMin + yMax) / 2, cz = (zMin + zMax) / 2;
-    const span = Math.max(xMax - xMin, yMax - yMin, zMax - zMin, 1);
+    const cx = (xMin + xMax) / 2, cy = ((yMin + yMax) / 2) * BRICK_HEIGHT, cz = (zMin + zMax) / 2;
+    const span = Math.max(xMax - xMin, (yMax - yMin) * BRICK_HEIGHT, zMax - zMin, 1);
 
     const { scene, camera, controls, dispose } = makeScene(el);
     camera.position.set(cx + span * 1.2, cy + span * 0.8, cz + span * 1.5);
@@ -161,17 +163,17 @@ function VoxelGridViewer({ voxels }) {
     scene.add(dir);
 
     const grid = new THREE.GridHelper(span * 2.5, 12, 0x334455, 0x223344);
-    grid.position.set(cx, yMin - 0.5, cz);
+    grid.position.set(cx, (yMin - 0.5) * BRICK_HEIGHT, cz);
     scene.add(grid);
 
-    const geo   = new THREE.BoxGeometry(0.85, 0.85, 0.85);
+    const geo   = new THREE.BoxGeometry(0.85, 0.85 * BRICK_HEIGHT, 0.85);
     const mat   = new THREE.MeshLambertMaterial();
     const mesh  = new THREE.InstancedMesh(geo, mat, voxels.length);
     const dummy = new THREE.Object3D();
     const color = new THREE.Color();
 
     voxels.forEach((v, i) => {
-      dummy.position.set(v.x, v.y, v.z);
+      dummy.position.set(v.x, v.y * BRICK_HEIGHT, v.z);
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
       if (v.r !== undefined) {
@@ -210,9 +212,9 @@ function LegoModelViewer({ model }) {
 
     const { bricks, dimensions } = model;
     const cx = dimensions.width  / 2;
-    const cy = dimensions.height / 2;
+    const cy = (dimensions.height * BRICK_HEIGHT) / 2;
     const cz = dimensions.depth  / 2;
-    const span = Math.max(dimensions.width, dimensions.height, dimensions.depth, 1);
+    const span = Math.max(dimensions.width, dimensions.height * BRICK_HEIGHT, dimensions.depth, 1);
 
     const { scene, camera, controls, dispose } = makeScene(el);
     camera.position.set(cx + span * 1.5, cy + span, cz + span * 2);
@@ -242,8 +244,8 @@ function LegoModelViewer({ model }) {
     const color = new THREE.Color();
 
     bricks.forEach((b, i) => {
-      dummy.position.set(b.x + b.width / 2, b.y + b.height / 2, b.z + b.depth / 2);
-      dummy.scale.set(b.width * 0.94, b.height * 0.94, b.depth * 0.94);
+      dummy.position.set(b.x + b.width / 2, (b.y + b.height / 2) * BRICK_HEIGHT, b.z + b.depth / 2);
+      dummy.scale.set(b.width * 0.94, b.height * BRICK_HEIGHT * 0.97, b.depth * 0.94);
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
       color.set(b.color);
@@ -394,7 +396,7 @@ function VoxelBay({ voxelData }) {
       <h3 className="mt-2 text-xl font-bold text-white">Voxel Grid</h3>
       <p className="mt-2 text-sm leading-6 text-slate-300">
         {voxelData
-          ? `${voxelData.voxel_count.toLocaleString()} voxels at ${voxelData.voxel_size} unit resolution.`
+          ? `${voxelData.voxel_count.toLocaleString()} voxels, ${voxelData.stud_span ?? "?"} studs across.`
           : "Open3D converts the point cloud into a discrete cube grid."}
       </p>
     </article>
@@ -542,7 +544,7 @@ function UploadPanel({ canUpload, error, files, inputRef, isUploading, onFiles, 
           <p className="text-sm font-semibold uppercase tracking-[0.18em] text-amber-300">Upload Pictures</p>
           <h2 className="mt-2 text-2xl font-bold text-white">Stow away 8–16 images o’ yer object below deck</h2>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
-            Hoist yer camera, matey, and gather yer images in JPG, PNG, HEIC, or WebP from all around the booty! For the finest plunder, snap 8 shots level with the object, turnin’ it 45° each time, then climb above and take 8 more from on high at the same bearings.
+            Hoist yer camera, matey, and gather yer images in JPG, PNG, HEIC, or WebP from all around the booty! For the finest plunder, set it on a plain backdrop, snap 8 shots level with the object turnin’ it 45° clockwise (seen from above) each time, then climb above and take 8 more from on high at the same bearings. Keep the camera still and hoist the shots aboard in the order ye took ’em.
           </p>
         </div>
         <div className="rounded-md border border-amber-200/20 bg-amber-900/20 px-3 py-2 text-sm text-amber-50">

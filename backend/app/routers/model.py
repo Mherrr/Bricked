@@ -134,7 +134,8 @@ async def get_voxels(run_id: str):
     {
       "voxels": [{"x","y","z"}, ...],
       "voxel_count": 12345,
-      "voxel_size": 0.05
+      "voxel_size": 0.0357,
+      "stud_span": 28
     }
     """
     oid = _validate_object_id(run_id)
@@ -164,6 +165,7 @@ async def get_voxels(run_id: str):
         "voxels":      voxels,
         "voxel_count": vox["voxel_count"],
         "voxel_size":  vox["voxel_size"],
+        "stud_span":   vox.get("stud_span"),
     }
 
 

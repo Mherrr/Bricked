@@ -20,7 +20,7 @@ import cv2
 import numpy as np
 from bson import ObjectId
 from fastapi import HTTPException
-from scipy.ndimage import label as nd_label
+from scipy.ndimage import binary_erosion, generate_binary_structure, label as nd_label
 
 from app.database import get_db, get_gridfs
 
@@ -31,6 +31,8 @@ logger = logging.getLogger(__name__)
 GRID_SIZE        = 256   # Voxel grid resolution (N³)
 CAMERA_DISTANCE  = 3.0   # Distance from camera to object origin; object spans [-1,1]³
 CAMERA_ELEVATION = 0.3   # Radians (~17°) — cameras tilt slightly downward
+HIGH_ELEVATION   = 0.8   # Radians (~45°) — the "from above" ring of a two-ring capture
+TWO_RING_MIN     = 12    # an even upload of at least this many photos is two rings
 
 # Silhouette normalisation — each raw mask is cropped to its bounding box,
 # padded, and resized to a square before projection.  The focal length is then
@@ -39,7 +41,7 @@ CAMERA_ELEVATION = 0.3   # Radians (~17°) — cameras tilt slightly downward
 NORM_SIZE        = 512   # Normalised silhouette side length in pixels
 NORM_PAD         = 0.10  # Fractional padding added around the bounding box
 DILATION_PX      = 2     # Extra dilation on the normalised mask (error margin)
-THIN_OPEN_PX     = 3     # Opening kernel radius to disconnect thin protrusions (straws, stems)
+THIN_OPEN_PX     = 0     # Opening radius to cut thin protrusions (0 = keep them; they are real geometry)
 
 # Concavity-enhanced carving: voxels projecting into the "phantom" zone
 # (inside silhouette convex hull but outside the silhouette itself) are
@@ -52,7 +54,10 @@ _PROJ_CHUNK      = 4_000_000
 
 # A voxel is kept when it lies inside at least this fraction of views.
 # Higher = tighter hull, lower = more tolerant of camera model errors.
-MIN_VOTE_FRAC    = 0.75
+MIN_VOTE_FRAC    = 1.0
+
+# How silhouettes are cropped before projection — see _crop_windows.
+NORMALIZATION    = "shared_crop"
 
 
 # ── Core silhouette helpers ───────────────────────────────────────────────────
@@ -88,7 +93,9 @@ def _build_camera(
     """
     Return (R, t) for a turntable camera.
     Camera sits on a circle of given radius at the given elevation angle and
-    looks at the world origin.  Convention: X_cam = R @ X_world + t.
+    looks at the world origin.  Convention: X_cam = R @ X_world + t, with
+    camera +X pointing image-right and +Y image-down, matching pixel
+    coordinates (u right, v down) so photos are not interpreted upside-down.
     """
     cam_pos = np.array([
         distance * np.cos(elevation) * np.sin(angle),
@@ -100,9 +107,9 @@ def _build_camera(
     world_up = np.array([0.0, 1.0, 0.0])
     if abs(np.dot(z_axis, world_up)) > 0.99:              # near-vertical view
         world_up = np.array([0.0, 0.0, 1.0])
-    x_axis = np.cross(world_up, z_axis)
+    x_axis = np.cross(z_axis, world_up)                    # image right
     x_axis /= np.linalg.norm(x_axis)
-    y_axis = np.cross(z_axis, x_axis)
+    y_axis = np.cross(z_axis, x_axis)                      # image down
 
     R = np.stack([x_axis, y_axis, z_axis], axis=0)        # (3, 3)
     t = -R @ cam_pos                                       # (3,)
@@ -111,16 +118,91 @@ def _build_camera(
 
 # ── Visual Hull carving ───────────────────────────────────────────────────────
 
+def _bbox(mask: np.ndarray) -> tuple[int, int, int, int] | None:
+    """(r0, r1, c0, c1) inclusive bounding box of the foreground, or None if empty."""
+    rows = np.where(np.any(mask, axis=1))[0]
+    cols = np.where(np.any(mask, axis=0))[0]
+    if not rows.size:
+        return None
+    return int(rows[0]), int(rows[-1]), int(cols[0]), int(cols[-1])
+
+
+def _square_crop(
+    centre_r: float, centre_c: float, side: int, shape: tuple[int, int],
+) -> tuple[int, int, int, int]:
+    """Square window of `side` px centred on (centre_r, centre_c), as slice bounds (may exceed the image)."""
+    r0 = int(round(centre_r - side / 2.0))
+    c0 = int(round(centre_c - side / 2.0))
+    return r0, r0 + side, c0, c0 + side
+
+
+def _crop_windows(masks: list[np.ndarray], mode: str = None) -> list[tuple[int, int, int, int] | None]:
+    """
+    Choose the square window each silhouette is resampled from.
+
+    The carving camera model maps a fixed world extent to the window, so every
+    view must be cropped at the *same* pixel scale — otherwise a long object
+    seen end-on is blown up to the same size as its side view and the hull is
+    carved from mutually inconsistent silhouettes.
+
+      shared_crop  — one window for every view: the padded union of all
+                     silhouette boxes.  Exact for a fixed camera and a turntable
+                     (the object's rotation axis stays at a fixed image column).
+      shared_scale — common window size, but centred on each view's own box.
+                     Tolerates a camera that drifts between shots.
+      per_view     — each view cropped to its own box (legacy behaviour).
+    """
+    mode = mode or NORMALIZATION
+    boxes = [_bbox(m) for m in masks]
+    valid = [b for b in boxes if b is not None]
+    if not valid:
+        return [None] * len(masks)
+
+    if mode == "shared_crop" and len({m.shape for m in masks}) != 1:
+        mode = "shared_scale"                     # windows only comparable at one resolution
+
+    windows: list[tuple[int, int, int, int] | None] = []
+    if mode == "shared_crop":
+        r0 = min(b[0] for b in valid); r1 = max(b[1] for b in valid)
+        c0 = min(b[2] for b in valid); c1 = max(b[3] for b in valid)
+        side = int(np.ceil(max(r1 - r0, c1 - c0) * (1.0 + 2.0 * NORM_PAD))) + 1
+        win = _square_crop((r0 + r1) / 2.0, (c0 + c1) / 2.0, side, masks[0].shape)
+        return [win if b is not None else None for b in boxes]
+
+    if mode == "shared_scale":
+        side = int(np.ceil(max(max(b[1] - b[0], b[3] - b[2]) for b in valid) * (1.0 + 2.0 * NORM_PAD))) + 1
+    for b, m in zip(boxes, masks):
+        if b is None:
+            windows.append(None)
+            continue
+        own = int(np.ceil(max(b[1] - b[0], b[3] - b[2]) * (1.0 + 2.0 * NORM_PAD))) + 1
+        windows.append(_square_crop((b[0] + b[1]) / 2.0, (b[2] + b[3]) / 2.0,
+                                    side if mode == "shared_scale" else own, m.shape))
+    return windows
+
+
+def _crop_padded(img: np.ndarray, win: tuple[int, int, int, int]) -> np.ndarray:
+    """Slice a window out of img, zero-filling wherever it runs past the border."""
+    r0, r1, c0, c1 = win
+    h, w = img.shape[:2]
+    out = np.zeros((r1 - r0, c1 - c0) + img.shape[2:], dtype=img.dtype)
+    sr0, sr1 = max(r0, 0), min(r1, h)
+    sc0, sc1 = max(c0, 0), min(c1, w)
+    if sr1 > sr0 and sc1 > sc0:
+        out[sr0 - r0:sr1 - r0, sc0 - c0:sc1 - c0] = img[sr0:sr1, sc0:sc1]
+    return out
+
+
 def _normalize_silhouette(
     mask: np.ndarray,
+    window: tuple[int, int, int, int] | None,
     orig_bgr: np.ndarray | None = None,
     out_size: int    = NORM_SIZE,
-    pad_frac: float  = NORM_PAD,
     dilation_px: int = DILATION_PX,
     open_px: int     = THIN_OPEN_PX,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
     """
-    Crop to the object bounding box, add padding, resize to a square, apply
+    Resample the silhouette from its square crop window to out_size², apply
     optional opening to remove thin protrusions, then dilate for tolerance.
 
     If orig_bgr is provided (same H×W as mask), applies the identical crop and
@@ -128,41 +210,19 @@ def _normalize_silhouette(
 
     Returns (silhouette, concavity_mask, normed_rgb_or_None).
     """
-    rows = np.any(mask, axis=1)
-    cols = np.any(mask, axis=0)
-    if not rows.any():
+    if window is None:
         empty = np.zeros((out_size, out_size), dtype=np.uint8)
         return empty, empty, None
 
-    r0, r1 = int(np.where(rows)[0][0]),  int(np.where(rows)[0][-1])
-    c0, c1 = int(np.where(cols)[0][0]),  int(np.where(cols)[0][-1])
-    h_img, w_img = mask.shape
-
-    pad_r = max(1, int((r1 - r0) * pad_frac))
-    pad_c = max(1, int((c1 - c0) * pad_frac))
-    r0 = max(0, r0 - pad_r);  r1 = min(h_img, r1 + pad_r)
-    c0 = max(0, c0 - pad_c);  c1 = min(w_img, c1 + pad_c)
-
-    # Make square around centroid so aspect ratio doesn't distort projection
-    side = max(r1 - r0, c1 - c0)
-    cr   = (r0 + r1) // 2;  cc = (c0 + c1) // 2
-    r0   = max(0, cr - side // 2);  r1 = min(h_img, r0 + side)
-    c0   = max(0, cc - side // 2);  c1 = min(w_img, c0 + side)
-
-    cropped = mask[r0:r1, c0:c1]
-    if 0 in cropped.shape:
-        empty = np.zeros((out_size, out_size), dtype=np.uint8)
-        return empty, empty, None
-
+    cropped = _crop_padded(mask, window)
     normed = cv2.resize(cropped, (out_size, out_size), interpolation=cv2.INTER_NEAREST)
 
     # Normalise colour image with the same crop before any morphological ops
     normed_rgb: np.ndarray | None = None
-    if orig_bgr is not None:
-        color_crop = orig_bgr[r0:r1, c0:c1]
-        if 0 not in color_crop.shape:
-            color_resized = cv2.resize(color_crop, (out_size, out_size), interpolation=cv2.INTER_LINEAR)
-            normed_rgb = cv2.cvtColor(color_resized, cv2.COLOR_BGR2RGB)
+    if orig_bgr is not None and orig_bgr.shape[:2] == mask.shape:
+        color_crop    = _crop_padded(orig_bgr, window)
+        color_resized = cv2.resize(color_crop, (out_size, out_size), interpolation=cv2.INTER_LINEAR)
+        normed_rgb    = cv2.cvtColor(color_resized, cv2.COLOR_BGR2RGB)
 
     # Remove thin protrusions (straws, stems) via opening + largest component
     if open_px > 0:
@@ -279,6 +339,8 @@ def _visual_hull_carving(
     silhouettes: list[np.ndarray],
     image_sizes: list[tuple[int, int]],
     orig_images: list[np.ndarray] | None = None,
+    angles: np.ndarray | None = None,
+    elevations: np.ndarray | None = None,
     grid_size: int   = GRID_SIZE,
     distance: float  = CAMERA_DISTANCE,
     elevation: float = CAMERA_ELEVATION,
@@ -297,71 +359,77 @@ def _visual_hull_carving(
     """
     n_views = len(silhouettes)
     sz      = float(NORM_SIZE)
-    f_eff   = (0.5 - NORM_PAD) * sz * distance
+    # World ±1 at the orbit distance maps to the un-padded part of the window
+    f_eff   = sz / (2.0 * (1.0 + 2.0 * NORM_PAD)) * distance
     cx = cy = sz / 2.0
     w  = h  = NORM_SIZE
 
     coords  = np.linspace(-1.0, 1.0, grid_size, dtype=np.float32)
     n_total = grid_size ** 3
-    votes   = np.zeros(n_total, dtype=np.int32)
-    concav  = np.zeros(n_total, dtype=np.int16)
-    angles  = np.linspace(0.0, 2.0 * np.pi, n_views, endpoint=False)
+    if angles is None:
+        angles = np.linspace(0.0, 2.0 * np.pi, n_views, endpoint=False)
+    if elevations is None:
+        elevations = np.full(n_views, elevation)
 
     # Pre-compute silhouettes, concavity masks, camera matrices, and colour images
     view_data: list[tuple] = []
+    windows = _crop_windows(silhouettes)
     for i, angle in enumerate(angles):
         orig_bgr = orig_images[i] if orig_images else None
-        sil, cav, normed_rgb = _normalize_silhouette(silhouettes[i], orig_bgr=orig_bgr)
-        R, t = _build_camera(angle, elevation, distance)
+        sil, cav, normed_rgb = _normalize_silhouette(
+            silhouettes[i], windows[i], orig_bgr=orig_bgr,
+            dilation_px=DILATION_PX, open_px=THIN_OPEN_PX,
+        )
+        R, t = _build_camera(angle, elevations[i], distance)
         view_data.append((sil, cav, R.astype(np.float32), t.astype(np.float32), normed_rgb))
 
     gs2 = grid_size * grid_size
+    min_votes    = max(1, int(np.ceil(n_views * MIN_VOTE_FRAC)))
+    allowed_miss = n_views - min_votes
+    occupied     = np.zeros(n_total, dtype=bool)
 
     for chunk_start in range(0, n_total, _PROJ_CHUNK):
         chunk_end = min(chunk_start + _PROJ_CHUNK, n_total)
 
-        flat_idx = np.arange(chunk_start, chunk_end, dtype=np.int32)
-        ix = flat_idx // gs2
-        iy = (flat_idx // grid_size) % grid_size
-        iz = flat_idx % grid_size
-        chunk = np.stack([coords[ix], coords[iy], coords[iz]], axis=1)
-        del flat_idx, ix, iy, iz
-
-        chunk_votes = np.zeros(chunk_end - chunk_start, dtype=np.int32)
-        chunk_concav = np.zeros(chunk_end - chunk_start, dtype=np.int16)
+        # Indices of voxels still in the running; a voxel is dropped the moment
+        # it can no longer reach min_votes (or trips the concavity veto), so
+        # later views only project the survivors.
+        alive  = np.arange(chunk_start, chunk_end, dtype=np.int32)
+        misses = np.zeros(alive.size, dtype=np.int16)
+        concav = np.zeros(alive.size, dtype=np.int16)
 
         for sil, cav, R, t, _normed_rgb in view_data:
-            pts_cam  = chunk @ R.T + t
+            if not alive.size:
+                break
+            pts = np.stack([coords[alive // gs2],
+                            coords[(alive // grid_size) % grid_size],
+                            coords[alive % grid_size]], axis=1)
+            pts_cam  = pts @ R.T + t
             z        = pts_cam[:, 2]
             in_front = z > 1e-4
 
             safe_z = np.where(in_front, z, 1.0)
-            px = f_eff * pts_cam[:, 0] / safe_z + cx
-            py = f_eff * pts_cam[:, 1] / safe_z + cy
-
-            px_i = np.round(px).astype(np.int32)
-            py_i = np.round(py).astype(np.int32)
+            px_i = np.round(f_eff * pts_cam[:, 0] / safe_z + cx).astype(np.int32)
+            py_i = np.round(f_eff * pts_cam[:, 1] / safe_z + cy).astype(np.int32)
 
             in_bounds = in_front & (px_i >= 0) & (px_i < w) & (py_i >= 0) & (py_i < h)
             valid     = np.where(in_bounds)[0]
 
-            in_sil = np.zeros(chunk_end - chunk_start, dtype=bool)
-            in_cav = np.zeros(chunk_end - chunk_start, dtype=bool)
+            in_sil = ~in_front                        # behind the camera: no evidence
+            in_cav = np.zeros(alive.size, dtype=bool)
             if valid.size:
                 in_sil[valid] = sil[py_i[valid], px_i[valid]] > 0
                 in_cav[valid] = cav[py_i[valid], px_i[valid]] > 0
 
-            chunk_votes  += (in_sil | ~in_front).astype(np.int32)
-            chunk_concav += (in_cav & in_front).astype(np.int16)
+            misses += ~in_sil
+            concav += in_cav
+            keep = (misses <= allowed_miss) & (concav < CONCAVITY_VETO)
+            alive, misses, concav = alive[keep], misses[keep], concav[keep]
 
-        votes[chunk_start:chunk_end]  = chunk_votes
-        concav[chunk_start:chunk_end] = chunk_concav
+        occupied[alive] = True
 
-    min_votes   = max(1, int(np.ceil(n_views * MIN_VOTE_FRAC)))
-    occupied_3d = (
-        (votes >= min_votes) & (concav < CONCAVITY_VETO)
-    ).reshape(grid_size, grid_size, grid_size)
-    del votes, concav
+    occupied_3d = occupied.reshape(grid_size, grid_size, grid_size)
+    del occupied
 
     # ── Keep only the largest connected component ────────────────────────────
     labeled, n_components = nd_label(occupied_3d)
@@ -385,7 +453,12 @@ def _visual_hull_carving(
         keep = labeled > 0
     del labeled
 
-    # Reconstruct world coordinates for occupied voxels
+    # Only the hull's surface is stored: the interior carries no colour
+    # information and is re-filled by the voxelization stage.  This cuts the
+    # serialised point cloud by roughly an order of magnitude.
+    keep &= ~binary_erosion(keep, structure=generate_binary_structure(3, 1), border_value=0)
+
+    # Reconstruct world coordinates for surface voxels
     occ_idx = np.where(keep.ravel())[0].astype(np.int32)
     del keep
     ix = occ_idx // gs2
@@ -397,6 +470,49 @@ def _visual_hull_carving(
     colors = _sample_colors(occupied_pts, view_data, f_eff, cx, cy, w, h)
 
     return occupied_pts, colors
+
+
+def view_poses(view_indices: list[int], n_uploaded: int) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Camera (azimuth, elevation) for each surviving photo, from its position in
+    the upload order — so a photo rejected by segmentation leaves a gap instead
+    of shifting every later view onto the wrong bearing.
+
+    Captures of TWO_RING_MIN or more photos (even count) are read as two rings,
+    as the UI recommends: the first half level with the object, the second
+    half from above at the same bearings.
+    """
+    two_rings = n_uploaded >= TWO_RING_MIN and n_uploaded % 2 == 0
+    per_ring  = n_uploaded // 2 if two_rings else n_uploaded
+    idx       = np.asarray(view_indices)
+    angles    = 2.0 * np.pi * (idx % per_ring) / per_ring
+    elevations = np.where(idx >= per_ring, HIGH_ELEVATION, CAMERA_ELEVATION) if two_rings \
+        else np.full(len(idx), CAMERA_ELEVATION)
+    return angles, elevations
+
+
+def carve_views(
+    view_indices: list[int],
+    n_uploaded: int,
+    silhouettes: list[np.ndarray],
+    orig_images: list[np.ndarray | None],
+) -> tuple[np.ndarray, np.ndarray]:
+    """Carve the visual hull from the views that survived segmentation."""
+    angles, elevations = view_poses(view_indices, n_uploaded)
+    image_sizes = [(s.shape[1], s.shape[0]) for s in silhouettes]
+    return _visual_hull_carving(silhouettes, image_sizes, orig_images,
+                                angles=angles, elevations=elevations)
+
+
+def to_point_list(pts: np.ndarray, colors: np.ndarray) -> list[dict]:
+    """Serialise the carved hull surface as {x, y, z, r, g, b} dicts (Y up)."""
+    return [
+        {
+            "x": round(float(p[0]), 4), "y": round(float(p[1]), 4), "z": round(float(p[2]), 4),
+            "r": int(c[0]), "g": int(c[1]), "b": int(c[2]),
+        }
+        for p, c in zip(pts, colors)
+    ]
 
 
 # ── Async pipeline stage ──────────────────────────────────────────────────────
@@ -429,17 +545,17 @@ async def run_reconstruction(run_id: str) -> dict:
 
         loop = asyncio.get_event_loop()
 
-        silhouettes : list[np.ndarray]      = []
-        image_sizes : list[tuple[int, int]] = []
-        orig_images : list[np.ndarray]      = []
+        silhouettes : list[np.ndarray]        = []
+        orig_images : list[np.ndarray | None] = []
+        view_indices: list[int]               = []
 
-        for entry in seg_images:
+        for pos, entry in enumerate(seg_images):
             # Load segmented mask
             seg_stream = await fs.open_download_stream(ObjectId(entry["segmented_file_id"]))
             seg_data   = await seg_stream.read()
-            sil, sz    = await loop.run_in_executor(None, _extract_silhouette, seg_data)
+            sil, _     = await loop.run_in_executor(None, _extract_silhouette, seg_data)
             silhouettes.append(sil)
-            image_sizes.append(sz)
+            view_indices.append(entry.get("view_index", pos))
 
             # Load original colour image for colour sampling
             orig_stream = await fs.open_download_stream(ObjectId(entry["original_file_id"]))
@@ -458,14 +574,11 @@ async def run_reconstruction(run_id: str) -> dict:
                 logger.warning("Could not decode original image for %s — colours will be gray", entry.get("filename", "?"))
             orig_images.append(bgr)
 
-        logger.info("Starting visual hull carving for run %s (%d views)", run_id, len(silhouettes))
+        n_uploaded = len(run.get("images", [])) or len(seg_images)
+        logger.info("Starting visual hull carving for run %s (%d/%d views)", run_id, len(silhouettes), n_uploaded)
 
         pts, colors = await loop.run_in_executor(
-            None,
-            _visual_hull_carving,
-            silhouettes,
-            image_sizes,
-            orig_images,
+            None, carve_views, view_indices, n_uploaded, silhouettes, orig_images,
         )
 
         if pts.shape[0] == 0:
@@ -476,14 +589,7 @@ async def run_reconstruction(run_id: str) -> dict:
 
         logger.info("Visual hull: %d occupied voxels for run %s", pts.shape[0], run_id)
 
-        # Serialise point cloud — 180° rotation around Z (negate X and Y)
-        point_list = [
-            {
-                "x": -float(p[0]), "y": -float(p[1]), "z": float(p[2]),
-                "r": int(c[0]),    "g": int(c[1]),    "b": int(c[2]),
-            }
-            for p, c in zip(pts, colors)
-        ]
+        point_list = to_point_list(pts, colors)
         pts_bytes = json.dumps(point_list).encode()
 
         cloud_id = await fs.upload_from_stream(

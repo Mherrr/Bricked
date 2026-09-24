@@ -15,27 +15,27 @@ def _validate_object_id(run_id: str):
 
 @router.post("/segment", status_code=202)
 async def segment(run_id: str):
-    """Trigger YOLO segmentation on uploaded images."""
+    """Segment the object in each uploaded image (backdrop model, YOLO fallback)."""
     _validate_object_id(run_id)
     return await segmentation_service.run_segmentation(run_id)
 
 
 @router.post("/reconstruct", status_code=202)
 async def reconstruct(run_id: str):
-    """Trigger OpenCV SfM 3D reconstruction from segmented images."""
+    """Carve the visual hull from the segmented silhouettes."""
     _validate_object_id(run_id)
     return await reconstruction_service.run_reconstruction(run_id)
 
 
 @router.post("/voxelize", status_code=202)
 async def voxelize(run_id: str):
-    """Trigger Open3D voxelization of the reconstructed point cloud."""
+    """Voxelize the hull into a brick-proportioned grid."""
     _validate_object_id(run_id)
     return await voxel_service.run_voxelization(run_id)
 
 
 @router.post("/lego", status_code=202)
 async def convert_to_lego(run_id: str):
-    """Trigger Trimesh LEGO conversion and generate the parts list."""
+    """Pack the voxels into LEGO bricks and generate the parts list."""
     _validate_object_id(run_id)
     return await lego_service.run_lego_conversion(run_id)

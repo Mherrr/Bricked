@@ -6,3 +6,4 @@ node_modules/
 dist/
 .vite/
 *.pt
+.pytest_cache/

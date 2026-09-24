@@ -3,9 +3,9 @@ Voxelization stage using Open3D + scipy.
 
 Pipeline:
   1. Load reconstructed point cloud from GridFS
-  2. Statistical outlier removal — drops isolated satellite clusters
-  3. Open3D VoxelGrid at VOXEL_SIZE — converts the continuous cloud to a coarse
-     discrete grid sized to produce ~300-500 LEGO bricks for a typical object
+  2. Convert to stud space (brick-height Y) and pick the voxel pitch
+  3. Open3D VoxelGrid in brick proportions (1 stud × 1 brick height), sized so
+     the longest side is TARGET_STUDS; the hull surface is then filled solid
   4. Gaussian smoothing of the 3-D occupancy grid — replaces jagged/complex
      surface detail with smooth, simplified geometry:
        · 1-voxel protrusions fall below the threshold and are removed
@@ -29,6 +29,8 @@ from fastapi import HTTPException
 from scipy.ndimage import (
     binary_dilation,
     binary_erosion,
+    binary_fill_holes,
+    distance_transform_edt,
     gaussian_filter,
     generate_binary_structure,
     label as nd_label,
@@ -40,20 +42,21 @@ logger = logging.getLogger(__name__)
 
 # ── Simplification parameters ─────────────────────────────────────────────────
 #
-# VOXEL_SIZE controls the coarseness of the output grid.
-# At 0.12 in [-1,1]³ the grid is ~17 cells per axis.  A solid cylindrical
-# object filling that space yields ~1 500-2 000 voxels → ~300-500 LEGO bricks
-# after greedy packing (average ~4 studs per brick).
+# TARGET_STUDS controls the coarseness of the output grid: the object's longest
+# dimension becomes this many studs (or the equivalent in brick heights), so
+# model size no longer depends on how the photos happened to be framed.
+# Cells are one stud wide and one brick tall — a LEGO brick is 1.2× taller
+# than its stud pitch — so the built model keeps the object's proportions.
 #
-# GAUSS_SIGMA of 1.0 smooths at the scale of ~1 voxel.  Combined with a
-# threshold slightly below 0.5 (GAUSS_THRESH=0.40) the filter:
-#   · removes 1-voxel bumps / small surface detail  (peak < 0.40 after blur)
-#   · fills shallow concavities                     (≥ 5/6 neighbors filled → > 0.40)
-#   · rounds sharp edges into smooth curves         (gradual falloff across corners)
-#
-# OPEN_ITERS=1 removes thin silhouette fins that the Gaussian pass may leave.
+# GAUSS_SIGMA / GAUSS_THRESH set how aggressively the occupancy grid is
+# smoothed before re-binarising: a larger sigma removes 1-voxel bumps and fills
+# shallow concavities, at the cost of rounding real corners.  The benchmark
+# (benchmark/evaluate.py) found shape accuracy flat for sigma 0.2–0.5, so a
+# light touch is used.  OPEN_ITERS > 0 adds a morphological opening to strip
+# thin fins; it is off because thin parts (legs, handles) are usually real.
 
-VOXEL_SIZE   = 0.07   # world units in [-1, 1]³  →  ~29 voxels per axis
+TARGET_STUDS = 28     # longest side of the model, in studs
+BRICK_ASPECT = 1.2    # brick height / stud pitch
 GAUSS_SIGMA  = 0.2    # smoothing radius in voxels
 GAUSS_THRESH = 0.45   # re-binarisation threshold after smoothing
 OPEN_ITERS   = 0      # morphological opening iterations (fin removal)
@@ -72,19 +75,23 @@ def _build_voxel_grid(point_list: list[dict]) -> list[dict]:
 
     pts      = np.array([[p["x"], p["y"], p["z"]] for p in point_list], dtype=np.float64)
     has_color = "r" in point_list[0]
-    n_raw    = len(pts)
 
-    # ── 1. Statistical outlier removal ───────────────────────────────────────
+    # Work in "stud space": squash Y so a cubic voxel becomes one brick tall,
+    # and pick the pitch that makes the longest side TARGET_STUDS cells.
+    pts[:, 1] /= BRICK_ASPECT
+    voxel_size = float(np.ptp(pts, axis=0).max()) / TARGET_STUDS or 1.0
+
+    # ── 1. Point cloud (no outlier removal: the reconstruction stage already
+    #        keeps only the hull's largest connected component, and statistical
+    #        outlier removal was measured to strip real thin geometry)
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(pts)
     if has_color:
         rgb = np.array([[p["r"], p["g"], p["b"]] for p in point_list], dtype=np.float64) / 255.0
         pcd.colors = o3d.utility.Vector3dVector(rgb)
-    pcd, ind = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
-    logger.debug("SOR: %d → %d points", n_raw, len(pcd.points))
 
     # ── 2. Coarse voxelisation ────────────────────────────────────────────────
-    vg         = o3d.geometry.VoxelGrid.create_from_point_cloud(pcd, voxel_size=VOXEL_SIZE)
+    vg         = o3d.geometry.VoxelGrid.create_from_point_cloud(pcd, voxel_size=voxel_size)
     raw_voxels = vg.get_voxels()
     if not raw_voxels:
         return []
@@ -118,6 +125,10 @@ def _build_voxel_grid(point_list: list[dict]) -> list[dict]:
         for i, k in enumerate(keys):
             color_map[k] = boosted[i]
 
+    # ── 3c. Solidify — the reconstruction stage stores only the hull surface,
+    #        so fill the enclosed interior before simplifying the shape.
+    grid = binary_fill_holes(grid > 0).astype(np.float32)
+
     # ── 4. Gaussian smoothing — shape simplification ──────────────────────────
     smoothed = gaussian_filter(grid, sigma=GAUSS_SIGMA)
     grid_bin = smoothed >= GAUSS_THRESH
@@ -128,9 +139,14 @@ def _build_voxel_grid(point_list: list[dict]) -> list[dict]:
     )
 
     # ── 5. Morphological opening — remove remaining thin fins ─────────────────
-    struct  = generate_binary_structure(3, 1)   # 6-connected face kernel
-    eroded  = binary_erosion(grid_bin, structure=struct, iterations=OPEN_ITERS, border_value=0)
-    cleaned = binary_dilation(eroded,  structure=struct, iterations=OPEN_ITERS)
+    # (scipy treats iterations=0 as "repeat until nothing changes", which
+    #  erodes the whole grid away — so skip the opening entirely when disabled)
+    if OPEN_ITERS > 0:
+        struct  = generate_binary_structure(3, 1)   # 6-connected face kernel
+        eroded  = binary_erosion(grid_bin, structure=struct, iterations=OPEN_ITERS, border_value=0)
+        cleaned = binary_dilation(eroded,  structure=struct, iterations=OPEN_ITERS)
+    else:
+        cleaned = grid_bin
 
     # ── 6. Largest connected component ────────────────────────────────────────
     labeled, n_comp = nd_label(cleaned)
@@ -159,27 +175,20 @@ def _build_voxel_grid(point_list: list[dict]) -> list[dict]:
         return [{"x": int(x), "y": int(y), "z": int(z)} for x, y, z in zip(xi, yi, zi)]
 
     # ── 7. Assign colors to final voxels ─────────────────────────────────────
-    _NEIGHBOR_OFFSETS = [
-        (dx, dy, dz)
-        for dx in (-1, 0, 1)
-        for dy in (-1, 0, 1)
-        for dz in (-1, 0, 1)
-        if not (dx == 0 and dy == 0 and dz == 0)
-    ]
+    # Every voxel takes the colour of the nearest cell that received one from
+    # the point cloud (interior cells filled in step 3c, and any cell the
+    # smoothing added, inherit from the closest surface).
+    has_rgb = np.ones(final_grid.shape, dtype=bool)
+    for key in color_map:
+        if all(k < n for k, n in zip(key, final_grid.shape)):
+            has_rgb[key] = False                      # EDT measures distance to zeros
+    _, (ni, nj, nk) = distance_transform_edt(has_rgb, return_indices=True)
     _GRAY = np.array([128, 128, 128], dtype=np.uint8)
 
     result = []
     for x, y, z in zip(xi, yi, zi):
-        key = (int(x), int(y), int(z))
-        rgb = color_map.get(key)
-        if rgb is None:
-            # Dilation may have added this cell — sample nearest neighbor
-            for dx, dy, dz in _NEIGHBOR_OFFSETS:
-                rgb = color_map.get((key[0] + dx, key[1] + dy, key[2] + dz))
-                if rgb is not None:
-                    break
-            if rgb is None:
-                rgb = _GRAY
+        src = (int(ni[x, y, z]), int(nj[x, y, z]), int(nk[x, y, z]))
+        rgb = color_map.get(src, _GRAY)
         result.append({
             "x": int(x), "y": int(y), "z": int(z),
             "r": int(rgb[0]), "g": int(rgb[1]), "b": int(rgb[2]),
@@ -216,7 +225,7 @@ async def run_voxelization(run_id: str) -> dict:
         if not voxels:
             raise ValueError("Voxel grid is empty after simplification — point cloud may be too sparse")
 
-        logger.info("Voxelized run %s: %d voxels (voxel_size=%.3f)", run_id, len(voxels), VOXEL_SIZE)
+        logger.info("Voxelized run %s: %d voxels (%d studs across)", run_id, len(voxels), TARGET_STUDS)
 
         voxel_bytes   = json.dumps(voxels).encode()
         voxel_file_id = await gridfs.upload_from_stream(
@@ -228,7 +237,8 @@ async def run_voxelization(run_id: str) -> dict:
         voxel_meta = {
             "voxel_file_id": str(voxel_file_id),
             "voxel_count":   len(voxels),
-            "voxel_size":    VOXEL_SIZE,
+            "voxel_size":    round(1.0 / TARGET_STUDS, 4),   # fraction of the longest side
+            "stud_span":     TARGET_STUDS,
         }
 
         await db.runs.update_one(
