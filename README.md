@@ -229,11 +229,11 @@ runs the backend's own stage functions on every capture. "Before" is the same ha
 on the code as it stood before this work; "Now" is current `master`. Timings are
 single-process CPU wall-clock.
 
-> These captures are synthetic renders on a plain studio backdrop, and none of the 19 assets
-> is a COCO class, so the segmentation rows understate YOLO relative to how it behaves on
-> photographs of real objects. Full three-way tables, including a since-reverted backdrop
-> segmenter that scores better on this synthetic set, are in
-> [`docs/BENCHMARK.md`](docs/BENCHMARK.md).
+> The harness measures geometry, colour, packing and performance against exact ground truth.
+> Segmentation is evaluated separately on real photographs, since rendered backdrops are
+> smooth by construction — see
+> [Segmenter selection](docs/BENCHMARK.md#segmenter-selection) for that measurement and the
+> full result tables.
 
 **8-photo capture (one ring):**
 

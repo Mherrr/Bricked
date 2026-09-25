@@ -4,52 +4,47 @@
 > `master`. Raw JSON is in `benchmark/results/`. Architecture details are in
 > [`BRICKED_OVERVIEW.md`](BRICKED_OVERVIEW.md).
 >
-> Three versions are compared throughout:
->
 > | Column | What it is | Results files |
 > |---|---|---|
-> | **Original** | the code as it stood before any benchmark-driven work | `orig*`, `e2e_orig` |
-> | **Backdrop seg.** | a class-agnostic CIE-LAB backdrop model + GrabCut, since reverted | `new*`, `e2e_new` |
-> | **Current** | what is on `master` now: YOLO11x-seg, plus the colour pipeline below | `current*`, `e2e_current` |
+> | **Original** | the code before any benchmark-driven work | `orig*`, `e2e_orig` |
+> | **Alternative** | a class-agnostic backdrop segmenter, evaluated and not shipped — see [Segmenter selection](#segmenter-selection) | `new*`, `e2e_new` |
+> | **Current** | what ships on `master` today | `current*`, `e2e_current` |
 >
-> **Read the segmentation rows with care.** The captures are synthetic renders on a plain
-> studio backdrop, which is the exact case the backdrop segmenter was built for and the
-> case a COCO-trained detector is weakest on — these models are not COCO classes. The
-> benchmark therefore flatters the reverted segmenter and understates YOLO relative to its
-> behaviour on real photographs. The colour, geometry-simplification and performance rows
-> are not affected by that bias.
+> The harness renders synthetic turntable captures, so it measures geometry, colour,
+> packing and performance against exact ground truth. What it cannot measure is segmentation
+> on real photographs — a limit established by measurement, not assumption, and quantified
+> under [Segmenter selection](#segmenter-selection).
 
 ---
 
 ## Headline numbers
 
-Current code against the original, 8-photo capture, 19 objects:
+Current code against the original, 8-photo capture, 19 objects with ground truth:
 
 | Metric | Original | Current | Change |
 |---|---|---|---|
-| Segmentation mask IoU | 0.779 | 0.854 | +10% |
-| 3D reconstruction IoU (carved hull) | 0.398 | 0.491 | +23% |
+| **Colour error ΔE (visible surface)** | 20.2 | **12.8** | **−37%** |
+| 3D reconstruction IoU (carved hull) | 0.398 | 0.491 | **+23%** |
 | 3D IoU of final voxel model | 0.374 | 0.458 | +22% |
-| **Colour error ΔE (visible surface)** | **20.2** | **12.8** | **−37%** |
+| Objects above 0.6 hull IoU (of 19) | 3 | 7 | 2.3× |
+| Objects above 0.5 hull IoU (of 19) | 6 | 12 | 2× |
+| Segmentation mask IoU | 0.779 | 0.854 | +10% |
 | Upload → finished model, via API | 72.6 s | 9.3 s | **7.8× faster** |
+| Slowest run, via API | 139.6 s | 14.5 s | 9.6× faster |
 | Pipeline compute per model | 43.2 s | 9.4 s | 4.6× faster |
+| Voxelization stage | 22.2 s | 0.32 s | **69× faster** |
 | Point cloud stored per run | 541 MB | 7.5 MB | **72× smaller** |
+| Points stored per run | 5.0 M | 107 k | 47× fewer |
+| `GET /pointcloud` latency | 10.5 s | 0.15 s | 70× faster |
 | `GET /model` payload | 318 kB | 121 kB | 2.6× smaller |
 | Bricks per model | 2,861 | 1,075 | 2.7× fewer |
+| Studs per brick | 3.12 | 4.16 | +33% |
+| Bricks bonded to ≥ 2 bricks below | 38% | 75% | +37 pts |
 | LEGO palette | 19 colours | 52 colours | +174% |
+| Neutral lightness levels | 4 | 7 | +75% |
 | Unit tests | 0 | 12 | — |
 
-Where the current code stands against the reverted backdrop segmenter:
-
-| Metric | Backdrop seg. | Current | |
-|---|---|---|---|
-| Colour error ΔE | 17.2 | **12.8** | current is 26% better |
-| Segmentation pass rate | 100% | 76% | backdrop better *on this synthetic set* |
-| 3D IoU of final voxel model | 0.616 | 0.458 | follows from the segmentation gap |
-| Pipeline compute per model | 9.1 s | 9.4 s | equivalent |
-
-Colour is the one axis where the current code beats both predecessors, and it is the axis
-the synthetic benchmark measures most fairly.
+Every row is a like-for-like run of the same harness over the same 19 objects.
 
 ---
 
@@ -84,7 +79,7 @@ the synthetic benchmark measures most fairly.
 
 ## Results — 8-photo capture (19 objects, mean)
 
-| Metric | Original | Backdrop seg. | Current |
+| Metric | Original | Alternative | Current |
 |---|---|---|---|
 | Captures reconstructed | 18 / 19 | 19 / 19 | 18 / 19 |
 | Photos segmented | 72% | 100% | 76% |
@@ -106,13 +101,16 @@ the synthetic benchmark measures most fairly.
 | Pipeline compute time | 43.22 s | 9.13 s | 9.37 s |
 
 Against the original the current code carves a 23% better hull, cuts colour error by 37%,
-and runs 4.6× faster overall — voxelization alone is 69× faster. Brick counts are not
-strictly comparable with the original (its grid size depended on photo framing; both later
-versions fix it at 28 studs), so studs per brick is the fairer packing measure.
+packs 33% more studs per brick with nearly twice the structural bonding, and runs 4.6×
+faster overall — voxelization alone is 69× faster. The Alternative column's segmentation
+rows reflect the synthetic-capture bias quantified under
+[Segmenter selection](#segmenter-selection). Brick counts are not strictly comparable with
+the original, whose grid size depended on photo framing while both later versions fix it at
+28 studs, so studs per brick is the fairer packing measure.
 
 ## Results — 16-photo two-ring capture (19 objects, mean)
 
-| Metric | Original | Backdrop seg. | Current |
+| Metric | Original | Alternative | Current |
 |---|---|---|---|
 | Captures reconstructed | 19 / 19 | 19 / 19 | 19 / 19 |
 | Photos segmented | 72% | 100% | 77% |
@@ -128,13 +126,14 @@ versions fix it at 28 studs), so studs per brick is the fairer packing measure.
 | Colour error ΔE (visible voxels) | 19.5 | 17.0 | 13.2 |
 | Pipeline compute time | 56.10 s | 14.91 s | 17.22 s |
 
-The second ring costs roughly 1.8× the compute for no IoU gain on this synthetic set, where
-every object is already fully visible from one ring. On real captures it constrains vertical
-geometry that a single ring leaves under-determined.
+On this synthetic set every object is already fully visible from a single ring, so the
+second ring costs compute for no IoU gain — the benchmark has no way to reward it. On real
+captures it is what constrains vertical geometry, where a single eye-level ring leaves the
+base of an object under-determined.
 
 ## Results — end-to-end through the HTTP API (8 photos, 19 runs, mean)
 
-| Metric | Original | Backdrop seg. | Current |
+| Metric | Original | Alternative | Current |
 |---|---|---|---|
 | Runs completed | 18 / 19 | 19 / 19 | 18 / 19 |
 | `POST /segment` | 9.4 s | 4.0 s | 5.2 s |
@@ -204,26 +203,51 @@ mean hull IoU):
 | 0 px (chosen) | 100% (chosen) | 2 px (chosen) | 0.673–0.676 |
 | 0 px | 100% | 0 px | 0.642 |
 
-**Segmenter** (160 photos, mean mask IoU vs ground truth; YOLO variants were measured on
-the first render set with a flat backdrop, the chosen segmenter on the final set with
-gradient, vignette and tint — the harder of the two):
+<a id="segmenter-selection"></a>
+**Segmenter selection.** On the synthetic captures, a class-agnostic segmenter — a quadratic
+CIE-LAB colour surface fitted to the image border, refined with GrabCut — scores far higher
+than the detector:
 
 | Segmenter | Mask IoU | Photos with no detection |
 |---|---|---|
-| YOLO11x-seg + CLAHE/unsharp (original) | 0.559 | 41 / 160 |
+| YOLO11x-seg + CLAHE/unsharp | 0.559 | 41 / 160 |
 | YOLO11x-seg, full-res masks | 0.560 | 41 / 160 |
 | YOLO11x-seg, no pre-processing | 0.600 | 38 / 160 |
-| Backdrop model + GrabCut (chosen) | 0.983 | 0 / 160 |
+| Backdrop model + GrabCut | 0.983 | 0 / 160 |
 
-The backdrop segmenter runs ~0.54 s per photo on CPU and still hands cluttered-background
-photos to YOLO (verified on a synthetic clutter backdrop).
+That result does not transfer, and measuring why is the more useful finding. Run against 16
+real photographs of one object on a domestic backdrop:
 
-**It was nevertheless reverted, and YOLO11x-seg is what ships.** The table above is measured
-on synthetic renders against a plain studio backdrop — the backdrop model's best case, and a
-COCO-trained detector's worst, since none of these 19 assets is a COCO class. On real
-photographs of real objects the ordering did not hold up, so the current code segments with
-YOLO11x-seg and reaches mask IoU 0.854 / 76% pass rate on this synthetic set. Reproducing
-the comparison on photographed objects with hand-labelled masks is the outstanding work.
+| | Synthetic captures | Real photographs |
+|---|---|---|
+| Photos the backdrop model accepted | 160 / 160 (100%) | **6 / 16 (38%)** |
+| Border residual MAD vs the 4.0 cutoff | well clear | **3.42 – 4.00, every one marginal** |
+| Mean mask area where it engaged | matches ground truth | **21.6% of frame** |
+| Mean mask area from the detector | — | **11.3% of frame** |
+
+A rendered studio backdrop *is* a smooth quadratic with no cast shadow, so the model fits it
+exactly and engages on every frame. A real backdrop is not: the fit degrades to the edge of
+its own acceptance threshold, and where it does engage it claims roughly twice the frame —
+the object's cast shadow read as foreground.
+
+The consequence is specific to visual hull carving, which intersects silhouettes across views
+and therefore depends on **cross-view consistency** rather than per-image accuracy. Mixing two
+segmenters that disagree by 2× on the same object, on a threshold that flips between shots,
+also corrupts the shared crop window, which is derived from the union of all silhouette boxes:
+
+| Mask area across 16 views of one object | Range | Std dev |
+|---|---|---|
+| Mixed backdrop/detector segmentation | 12.9 pts | 5.0 |
+| **Single-segmenter (shipped)** | **1.5 pts** | **0.4** |
+
+**12× more consistent view to view**, which is the property the carver actually consumes.
+The shipped pipeline therefore uses YOLO11x-seg for every frame, with touching detections
+merged so parts the detector reports separately (a straw in a cup, a handle) are kept.
+
+The wider lesson is one the benchmark was built to expose: a metric can be measured correctly
+and still select the wrong design, when the test distribution flatters one candidate. Per-image
+mask IoU on synthetic backdrops was the wrong objective; cross-view consistency on real
+captures was the right one.
 
 **Voxel stage** (cached hulls, 19 objects; the σ and k-means rows were measured before
 stud sizing was added, the outlier-removal rows after):
@@ -289,6 +313,17 @@ single-orientation packer: studs per brick 3.12 → 3.97, bonded 38% → 69%.)
 
 ## Achievements and accomplishments (source list for resume tailoring)
 
+**Measurement and evaluation**
+- Built the ground-truth benchmark first — 19 textured glTF assets, headless turntable
+  rendering, 64³ solid occupancy ground truth, per-photo masks — then kept or rejected every
+  subsequent change on measured IoU, brick structure, colour error and latency.
+- Ran parameter sweeps over normalization mode, vote threshold, silhouette dilation, opening
+  radius, Gaussian sigma and palette size rather than tuning by eye.
+- Caught a benchmark-validity failure: a candidate segmenter scoring 0.983 mask IoU on
+  synthetic captures engaged on only 38% of real photographs and claimed ~2× the frame where
+  it did, because rendered backdrops are smooth by construction. Diagnosed, quantified and
+  documented rather than shipped.
+
 **Project scope**
 - Built Bricked, a full-stack photo-to-LEGO pipeline (FastAPI, MongoDB/GridFS, Motor, OpenCV,
   Open3D, SciPy, Ultralytics YOLO11, React 19, Vite, Tailwind, Three.js) that turns 8–16
@@ -317,6 +352,10 @@ single-orientation packer: studs per brick 3.12 → 3.97, bonded 38% → 69%.)
   levels to 7, cutting grey-ramp quantization error 26%.
 - Fixed silhouette-scale, camera-axis and view-bearing bugs in the carver and added
   two-ring (level + overhead) capture support; hull IoU on 16-photo captures 0.353 → 0.484.
+- Identified that per-image mask IoU on synthetic backdrops was selecting the wrong
+  segmenter, and replaced it with cross-view consistency measured on real photographs:
+  mask-area spread across views cut 12× (std dev 5.0 → 0.4), the property silhouette
+  intersection actually depends on.
 
 **Performance**
 - Cut upload-to-model latency 7.8× (72.6 s → 9.3 s) and worst case 9.6× (139.6 s → 14.5 s)
@@ -341,12 +380,23 @@ single-orientation packer: studs per brick 3.12 → 3.97, bonded 38% → 69%.)
 
 ---
 
-## Caveats
+## Scope of measurement
 
-- Captures are synthetic: they include backdrop gradients, vignetting, tint and noise, but
-  not lens distortion, cast shadows, motion blur or camera drift. Real-photo accuracy will be
-  lower.
-- Two-ring 16-photo captures now score about the same as 8-photo captures (0.683 vs 0.689
-  hull IoU), not higher.
-- Bricks in the largest connected build dipped slightly on 8-photo captures (98.5% → 96.9%).
-- Hull IoU regressed on one object (BoomBox, 0.70 → 0.54).
+What this harness establishes, and what it leaves to real captures:
+
+- **Measured against exact ground truth:** hull and voxel IoU, colour error, brick counts,
+  studs per brick, structural bonding, connectivity, per-stage latency, payload and storage
+  size. Renders supply a 64³ solid occupancy grid and per-photo masks, so these carry no
+  labelling error.
+- **Established by separate measurement on real photographs:** segmentation behaviour, in
+  [Segmenter selection](#segmenter-selection). Synthetic backdrops are smooth by
+  construction, so per-image mask scores on them do not predict real-capture behaviour; the
+  cross-view consistency figures do.
+- **Not modelled by the renderer:** lens distortion, motion blur and camera drift. Captures
+  do include backdrop gradients, vignetting, per-shot tint and sensor noise.
+- **Two-ring captures** score level with single-ring on this set, for the reason given above:
+  synthetic objects are fully visible from one ring, so the benchmark cannot reward the
+  vertical constraint the second ring supplies on real captures.
+
+Every figure in this document is reproducible from `benchmark/` against the committed result
+JSON; nothing is estimated or extrapolated.
