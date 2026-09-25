@@ -4,7 +4,8 @@ YOLO segmentation stage.
 For each uploaded image:
   1. Pre-process (CLAHE contrast + unsharp sharpening) to maximise YOLO confidence
   2. Run YOLOv11-seg to detect all objects and their masks
-  3. Pick the most prominent object (largest mask area)
+  3. Pick the most prominent object (largest mask area), then merge in any
+     detections touching it — a straw in a cup is reported separately
   4. Discard images whose mask fill ratio falls outside acceptable bounds
      Fill ratio = mask pixels inside bounding box / bounding box area.
      Too low → fragmented / missed object.  Too high → bbox flooded w/ background.
@@ -33,8 +34,14 @@ CONF_RETRY     = 0.10   # fallback threshold if nothing found at CONF_THRESHOLD
 # A well-segmented object should fill a meaningful but not total fraction of
 # its own bounding box.  Values outside this range indicate either a shredded
 # mask (too low) or a flood-fill that captured the background (too high).
-MIN_FILL_RATIO = 0.40   # below → mask too sparse / object not covered
+MIN_FILL_RATIO = 0.30   # below → mask too sparse / object not covered
 MAX_FILL_RATIO = 0.98   # above → mask swallowed the whole bbox region
+
+# YOLO reports a cup and the straw standing in it as two separate objects.
+# Detections whose boxes touch (or sit within this fraction of the image's
+# longer side of) the primary detection are merged into one silhouette, so
+# thin attached parts survive instead of being dropped with the smaller mask.
+MERGE_MARGIN_FRAC = 0.02
 
 
 @lru_cache(maxsize=1)
@@ -105,6 +112,57 @@ def _compute_fill_ratio(
     return fill
 
 
+def _boxes_touch(a: list[float], b: list[float], margin: float) -> bool:
+    """True when two xyxy boxes overlap, or lie within `margin` px of each other."""
+    return not (
+        a[2] + margin < b[0] or b[2] + margin < a[0]
+        or a[3] + margin < b[1] or b[3] + margin < a[1]
+    )
+
+
+def _merge_touching_masks(
+    masks: np.ndarray,
+    boxes: list[list[float]],
+    best_idx: int,
+    shape: tuple[int, int],
+    margin: float,
+) -> tuple[np.ndarray, list[float], list[int]]:
+    """
+    Union the primary detection with every mask whose box touches it, transitively.
+
+    Taking only the largest mask discards parts the detector reports separately —
+    a straw in a cup, a handle, a lid — amputating real geometry before the
+    silhouette ever reaches reconstruction.  Growing the selection by adjacency
+    keeps the whole physical object while still ignoring unrelated items
+    elsewhere in the frame.
+
+    Returns (binary_mask 0/255, merged xyxy box, indices merged).
+    """
+    import cv2
+
+    h, w = shape
+    keep: set[int] = {best_idx}
+    merged = list(boxes[best_idx])
+
+    changed = True
+    while changed:                      # transitive: straw → lid → cup
+        changed = False
+        for i, b in enumerate(boxes):
+            if i in keep or not _boxes_touch(merged, b, margin):
+                continue
+            keep.add(i)
+            merged = [min(merged[0], b[0]), min(merged[1], b[1]),
+                      max(merged[2], b[2]), max(merged[3], b[3])]
+            changed = True
+
+    union = np.zeros((h, w), dtype=np.uint8)
+    for i in sorted(keep):
+        resized = cv2.resize(masks[i], (w, h), interpolation=cv2.INTER_NEAREST)
+        union |= (resized > 0.5).astype(np.uint8)
+
+    return union * 255, merged, sorted(keep)
+
+
 def _segment_image(image_bytes: bytes) -> tuple[bytes, dict]:
     """
     Pre-process then run YOLO segmentation on raw image bytes.
@@ -139,12 +197,16 @@ def _segment_image(image_bytes: bytes) -> tuple[bytes, dict]:
     areas    = [m.sum() for m in masks]
     best_idx = int(np.argmax(areas))
 
-    best_mask    = masks[best_idx]
-    mask_resized = cv2.resize(best_mask, (w, h), interpolation=cv2.INTER_NEAREST)
-    binary_mask  = (mask_resized > 0.5).astype(np.uint8) * 255
+    if result.boxes is not None:
+        boxes = result.boxes.xyxy.cpu().tolist()
+        conf  = float(result.boxes.conf[best_idx].cpu())
+    else:
+        boxes = [[0.0, 0.0, float(w), float(h)] for _ in masks]
+        conf  = 0.0
 
-    box = result.boxes.xyxy[best_idx].cpu().tolist() if result.boxes is not None else [0, 0, w, h]
-    conf = float(result.boxes.conf[best_idx].cpu()) if result.boxes is not None else 0.0
+    # Merge parts the detector split off (straw, handle, lid) back into the object
+    margin = MERGE_MARGIN_FRAC * float(max(h, w))
+    binary_mask, box, merged = _merge_touching_masks(masks, boxes, best_idx, (h, w), margin)
 
     fill_ratio = _compute_fill_ratio(binary_mask, box)
 
@@ -172,6 +234,7 @@ def _segment_image(image_bytes: bytes) -> tuple[bytes, dict]:
         "fill_ratio": round(fill_ratio, 4),
         "confidence": round(conf, 4),
         "box": box,
+        "merged_masks": len(merged),
     }
 
 
@@ -197,7 +260,7 @@ async def run_segmentation(run_id: str) -> dict:
         segmented: list[dict] = []
         skipped:   list[dict] = []
 
-        for img in run.get("images", []):
+        for view_index, img in enumerate(run.get("images", [])):
             stream      = await gridfs.open_download_stream(ObjectId(img["file_id"]))
             image_bytes = await stream.read()
 
@@ -225,6 +288,7 @@ async def run_segmentation(run_id: str) -> dict:
                 detection_meta["confidence"],
             )
             segmented.append({
+                "view_index":        view_index,   # position in the capture sequence
                 "original_file_id":  img["file_id"],
                 "segmented_file_id": str(seg_file_id),
                 "filename":          seg_filename,

@@ -113,17 +113,11 @@ def _build_voxel_grid(point_list: list[dict]) -> list[dict]:
                 [int(round(c * 255)) for c in v.color], dtype=np.uint8
             )
 
-    # ── 3b. Saturation boost — Open3D averages colors across all points in a
-    #        voxel cell, which pulls mixed-surface cells toward gray.  Boost
-    #        saturation to restore vivid colors before downstream quantization.
-    if has_color and color_map:
-        keys   = list(color_map.keys())
-        rgb_arr = np.array([color_map[k] for k in keys], dtype=np.uint8).reshape(-1, 1, 3)
-        hsv     = cv2.cvtColor(rgb_arr, cv2.COLOR_RGB2HSV).astype(np.float32)
-        hsv[:, 0, 1] = np.clip(hsv[:, 0, 1] * 1.5, 0, 255)
-        boosted = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB).reshape(-1, 3)
-        for i, k in enumerate(keys):
-            color_map[k] = boosted[i]
+    # ── 3b. Saturation is boosted once, at colour-sampling time in the
+    #        reconstruction stage.  A second boost here compounded with that
+    #        one (1.8 x 1.5) and pushed near-neutral surfaces far enough off
+    #        the grey axis that a white-and-grey object quantized to tans and
+    #        browns, so no further adjustment is made.
 
     # ── 3c. Solidify — the reconstruction stage stores only the hull surface,
     #        so fill the enclosed interior before simplifying the shape.

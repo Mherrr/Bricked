@@ -49,12 +49,24 @@ THIN_OPEN_PX     = 0     # Opening radius to cut thin protrusions (0 = keep them
 # all views it is carved regardless of the vote threshold.
 CONCAVITY_VETO   = 2
 
+# Saturation gain applied to sampled voxel colours.  Purely multiplicative, so
+# a neutral surface stays neutral: gain scales the chroma an object actually
+# has rather than creating chroma where there was none.
+SATURATION_GAIN  = 1.25
+
+# White balance applied to sampled voxel colours before the saturation gain.
+# Gains come from the backdrop around the silhouette — see _illuminant_gains.
+
+WB_MAX_GAIN      = 1.8   # cap on how hard one channel may be pushed
+WB_MIN_BG_LEVEL  = 12    # per-channel level below which a backdrop pixel is crop zero-fill
+WB_MIN_BG_PIXELS = 5000  # too little backdrop to trust → skip white balance
+
 # Coords are generated lazily per chunk — no large pts_world allocation.
 _PROJ_CHUNK      = 4_000_000
 
 # A voxel is kept when it lies inside at least this fraction of views.
 # Higher = tighter hull, lower = more tolerant of camera model errors.
-MIN_VOTE_FRAC    = 1.0
+MIN_VOTE_FRAC    = 0.8
 
 # How silhouettes are cropped before projection — see _crop_windows.
 NORMALIZATION    = "shared_crop"
@@ -257,9 +269,55 @@ def _normalize_silhouette(
     return normed, concavity, normed_rgb
 
 
+def _illuminant_gains(view_data: list) -> np.ndarray:
+    """
+    Estimate the light's own colour from the backdrop, not from the object.
+
+    Phones shooting under warm indoor light record a white or grey object with a
+    heavy orange bias — measured at R−B ≈ +65 on a grey-and-white shoe — and the
+    LEGO palette then quantises it to tans and nougats.
+
+    The object is the wrong reference for correcting that: any grey-world style
+    estimate taken from a uniformly red object concludes the *light* is red and
+    divides the object's own colour away, turning it grey.  The backdrop is the
+    right reference — the app already asks for a plain one, it fills most of the
+    frame around the silhouette, and being roughly neutral its recorded colour is
+    close to the illuminant's.  Gains are clamped, and the correction is skipped
+    entirely when too little backdrop is visible to estimate from.
+    """
+    samples = []
+    for sil, _cav, _R, _t, rgb_img in view_data:
+        if rgb_img is None:
+            continue
+        bg = sil == 0
+        if not bg.any():
+            continue
+        px = rgb_img[bg].astype(np.float64)
+        # Drop the zero-fill _crop_padded writes where the window leaves the photo
+        px = px[px.sum(axis=1) > 3.0 * WB_MIN_BG_LEVEL]
+        if px.size:
+            samples.append(px)
+
+    if not samples:
+        logger.info("_illuminant_gains: no backdrop visible — white balance skipped")
+        return np.ones(3)
+
+    px = np.concatenate(samples)
+    if len(px) < WB_MIN_BG_PIXELS:
+        logger.info("_illuminant_gains: only %d backdrop pixels — white balance skipped", len(px))
+        return np.ones(3)
+
+    e     = np.maximum(np.median(px, axis=0), 1e-6)
+    gains = np.clip(e.mean() / e, 1.0 / WB_MAX_GAIN, WB_MAX_GAIN)
+    logger.info("_illuminant_gains: backdrop %s from %d px → gains %s",
+                e.round(1).tolist(), len(px), gains.round(3).tolist())
+    return gains
+
+
 def _sample_colors(
     occupied_pts: np.ndarray,
     view_data: list,
+    wb_gains: np.ndarray,
     f_eff: float,
     cx: float,
     cy: float,
@@ -327,9 +385,15 @@ def _sample_colors(
     best_color[no_data] = 128.0
     colors = np.clip(best_color, 0, 255).astype(np.uint8)
 
+    # ── White balance — gains estimated from the backdrop, see _illuminant_gains
+    colors = np.clip(colors.astype(np.float64) * wb_gains, 0, 255).astype(np.uint8)
+
     # ── Saturation boost — recovers vivid colours washed out by diffuse lighting
     hsv = cv2.cvtColor(colors.reshape(1, M, 3), cv2.COLOR_RGB2HSV).reshape(M, 3).astype(np.float32)
-    hsv[:, 1] = np.clip(hsv[:, 1] * 1.8 + 25, 0, 255)   # multiply + floor lift
+    # Multiply only — never add.  A floor lift gives every pixel saturation it
+    # never had, so a grey or white object acquires whatever hue the sensor
+    # noise and the room's light temperature happened to leave behind.
+    hsv[:, 1] = np.clip(hsv[:, 1] * SATURATION_GAIN, 0, 255)
     colors = cv2.cvtColor(hsv.astype(np.uint8).reshape(1, M, 3), cv2.COLOR_HSV2RGB).reshape(M, 3)
 
     return colors
@@ -467,7 +531,8 @@ def _visual_hull_carving(
     occupied_pts = np.stack([coords[ix], coords[iy], coords[iz]], axis=1)
 
     # ── Colour sampling pass (only over surviving voxels — very fast) ────────
-    colors = _sample_colors(occupied_pts, view_data, f_eff, cx, cy, w, h)
+    wb_gains = _illuminant_gains(view_data)
+    colors   = _sample_colors(occupied_pts, view_data, wb_gains, f_eff, cx, cy, w, h)
 
     return occupied_pts, colors
 

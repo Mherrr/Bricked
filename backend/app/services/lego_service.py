@@ -55,6 +55,32 @@ LEGO_PALETTE: dict[str, tuple[str, int, int, int]] = {
     "Magenta":              ("#923978", 146,  57, 120),
     "Bright Purple":        ("#81007B", 129,   0, 123),
     "Medium Lavender":      ("#AC78BA", 172, 120, 186),
+
+    # ── Neutral ramp ────────────────────────────────────────────────────────
+    # The greys carry every uncoloured object, and the ramp had holes of 83,
+    # 54 and 104 units of lightness between White, Medium Stone Gray, Dark
+    # Stone Gray and Black — so distinct greys on a photo collapsed onto one
+    # brick.  These are the real LEGO greys that land inside those holes.
+    # Flat Silver, Pearl Dark Gray and Pearl Gold have a pearlescent finish
+    # and are less widely stocked in every brick shape than the solid colours.
+    "Very Light Bluish Gray": ("#E6E3E0", 230, 227, 224),
+    "Flat Silver":            ("#898788", 137, 135, 136),
+    "Pearl Dark Gray":        ("#575857",  87,  88,  87),
+
+    # ── Additional solid colours ────────────────────────────────────────────
+    "Green":                ("#237841",  35, 120,  65),
+    "Medium Green":         ("#73DCA1", 115, 220, 161),
+    "Dark Turquoise":       ("#008F9B",   0, 143, 155),
+    "Dark Blue Violet":     ("#2032B0",  32,  50, 176),
+    "Dark Purple":          ("#3F3691",  63,  54, 145),
+    "Lavender":             ("#E1D5ED", 225, 213, 237),
+    "Dark Pink":            ("#C870A0", 200, 112, 160),
+    "Light Pink":           ("#FC97AC", 252, 151, 172),
+    "Sand Red":             ("#D67572", 214, 117, 114),
+    "Brown":                ("#583927",  88,  57,  39),
+    "Pearl Gold":           ("#AA7F2E", 170, 127,  46),
+    "Medium Orange":        ("#FFA70B", 255, 167,  11),
+    "Bright Light Yellow":  ("#FFF03A", 255, 240,  58),
 }
 
 # Pre-compute full palette in CIE-LAB for perceptually-uniform nearest-color lookup.
@@ -98,14 +124,53 @@ def _layer_footprints(y: int) -> list[tuple[int, int]]:
 # Raise to allow more colors; lower to be stricter about phantom-color suppression.
 _N_COLOR_CLUSTERS = 6
 
+# LAB chroma below which a colour counts as neutral (grey / white / black).
+# The palette's neutral ramp is sparse — White, Medium Stone Gray, Dark Stone
+# Gray — while a dozen low-chroma tinted colours (Dark Tan, Sand Green, Tan,
+# Light Nougat, Sand Blue) sit in the lightness gaps between them.  Plain
+# Euclidean LAB distance therefore matches a perfectly neutral grey to Dark Tan,
+# because closeness in lightness outweighs being off the grey axis.  Neutral
+# samples are matched only against neutral bricks so grey stays grey.
+NEUTRAL_CHROMA = 12.0
+
+# A sample counts as neutral a little further off the axis than a brick does.
+# After white balance a grey surface still carries a few units of chroma from
+# sensor noise and k-means centroid scatter; without the wider query threshold
+# those land on Dark Tan (chroma 14) or Light Aqua (13), which are exactly the
+# colours the guard exists to avoid.  Bricks stay judged at the tighter value,
+# so those two never become targets themselves.
+NEUTRAL_QUERY_CHROMA = 18.0
+
+_PALETTE_CHROMA = np.hypot(_PALETTE_LAB[:, 1] - 128.0, _PALETTE_LAB[:, 2] - 128.0)
+_PALETTE_IS_NEUTRAL = _PALETTE_CHROMA < NEUTRAL_CHROMA
+
+
+def _chroma(lab: np.ndarray) -> float:
+    """Distance of a LAB colour from the neutral (grey) axis."""
+    return float(np.hypot(lab[1] - 128.0, lab[2] - 128.0))
+
+
+def _nearest_index(query: np.ndarray, lab_array: np.ndarray) -> int:
+    """
+    Index of the closest colour in lab_array, keeping neutrals neutral.
+
+    When the query sits on the grey axis and the palette offers any neutral
+    entry, only neutral entries are considered; a slightly wrong grey level
+    reads far better than a grey turned tan.
+    """
+    diffs = ((lab_array - query) ** 2).sum(axis=1)
+    if _chroma(query) < NEUTRAL_QUERY_CHROMA:
+        neutral = np.hypot(lab_array[:, 1] - 128.0, lab_array[:, 2] - 128.0) < NEUTRAL_CHROMA
+        if neutral.any():
+            diffs = np.where(neutral, diffs, np.inf)
+    return int(np.argmin(diffs))
+
 
 def _quantize_against(r: int, g: int, b: int,
                       names: list[str], lab_array: np.ndarray) -> tuple[str, str]:
     """Nearest-LEGO-color lookup against an arbitrary (names, lab_array) palette."""
-    query = _rgb_to_lab(r, g, b)
-    diffs = lab_array - query
-    idx   = int(np.argmin((diffs ** 2).sum(axis=1)))
-    name  = names[idx]
+    idx  = _nearest_index(_rgb_to_lab(r, g, b), lab_array)
+    name = names[idx]
     return name, LEGO_PALETTE[name][0]
 
 
@@ -134,8 +199,7 @@ def _dominant_palette(voxels: list[dict]) -> tuple[list[str], np.ndarray]:
 
     used_names: list[str] = []
     for c in centroids:
-        diffs = _PALETTE_LAB - c.astype(np.float32)
-        idx   = int(np.argmin((diffs ** 2).sum(axis=1)))
+        idx   = _nearest_index(c.astype(np.float32), _PALETTE_LAB)
         name  = _PALETTE_NAMES[idx]
         if name not in used_names:
             used_names.append(name)
