@@ -71,7 +71,7 @@ backend/
 │   │   └── model.py                  model, parts, pointcloud, voxels, status
 │   └── services/
 │       ├── upload_service.py         validation, HEIC transcode, GridFS storage
-│       ├── segmentation_service.py   backdrop model + GrabCut, YOLO11x-seg fallback
+│       ├── segmentation_service.py   YOLO11x-seg, touching-mask merge, quality gating
 │       ├── reconstruction_service.py visual hull carving, view poses, colour sampling
 │       ├── voxel_service.py          stud-space voxelization + simplification
 │       └── lego_service.py           colour quantization + bond-aware brick packing
@@ -157,39 +157,35 @@ is preserved and later determines each photo's assumed camera bearing.
 
 ### 2 — Segmentation (`segmentation_service.py`)
 
-Two segmenters, chosen per image. All inference runs in a thread executor so the event
-loop is never blocked.
+**Ultralytics YOLO11x-seg**, loaded once and cached with `@lru_cache(maxsize=1)`. Inference
+runs in a thread executor so the event loop is never blocked.
 
-**Primary: class-agnostic backdrop segmentation.** The app asks for a plain backdrop, so the
-backdrop itself is modelled instead of the object:
-
-1. The image is downscaled to 640 px (long side) and converted to CIE-LAB.
-2. A **quadratic colour surface** (6-term basis: 1, x, y, x², y², xy) is least-squares fitted
-   per LAB channel to a 4% border strip. The quadratic absorbs lighting gradients and
-   vignetting that a single background colour cannot.
-3. The border residual's robust spread (median absolute deviation) decides whether the
-   backdrop is plain enough to model; a busy border (MAD > 4 LAB units, or > 10% of border
-   pixels far off the model) hands the image to YOLO instead.
-4. Foreground = residual above max(6 σ, 8 LAB units), cleaned with a 5×5 open/close.
-5. **GrabCut** refines the mask, seeded with sure-foreground (eroded mask), sure-background
-   (low residual and the border) and probable regions between.
-6. The main object is kept (largest component plus pieces ≥ 5% of it), and only holes
-   smaller than 1% of the object are filled — genuine openings like a mug handle or a watch
-   strap where the backdrop shows through are kept.
-7. Masks covering < 0.5% or > 90% of the frame are rejected.
-
-This handles any object — an avocado, a boom box, a lantern — rather than only the 80 COCO
-classes YOLO knows, and runs in ~0.5 s per image on CPU.
-
-**Fallback: Ultralytics YOLO11x-seg**, loaded once and cached with `@lru_cache(maxsize=1)`.
 Input is pre-processed with CLAHE on the L channel (clip 2.5, 8×8 tiles) and an unsharp mask
-(σ = 2.0, weights 1.4 / −0.4). Detection runs at `conf=0.35`, retrying at `conf=0.10`; the
-largest mask is taken and gated on **bounding-box fill ratio ∈ [0.40, 0.98]** (below:
-fragmented mask; above: mask flooded into the background).
+(σ = 2.0, weights 1.4 / −0.4), which lifts local contrast without blowing highlights and
+tightens mask boundaries. Detection runs at `conf=0.35`, retrying once at `conf=0.10` if
+nothing is found.
+
+**Detections are merged, not filtered to one.** The largest mask is the seed, then every
+detection whose box overlaps or sits within 2% of the image's longer side is unioned in,
+transitively. YOLO reports a cup and the straw standing in it as two separate objects, so
+keeping only the largest mask amputated real geometry before reconstruction ever saw it.
+Unrelated objects elsewhere in the frame are still excluded.
+
+The merged mask is gated on **bounding-box fill ratio ∈ [0.30, 0.98]** — below: fragmented
+mask; above: mask flooded into the background. The lower bound is deliberately loose because
+merging a thin part raises the bounding box far more than it raises mask area, so a *better*
+mask scores lower.
 
 Rejected images are **skipped, not fatal**, each with a human-readable reason surfaced in the
 UI. The stage fails only if fewer than 2 images survive. Output is one RGBA PNG per surviving
-image, with the mask as alpha, plus the image's `view_index`.
+image, with the mask as alpha, plus the image's `view_index` — the position in the capture
+sequence, so a rejected photo leaves a gap in the bearings instead of shifting every later
+view onto the wrong angle.
+
+> A class-agnostic alternative (quadratic CIE-LAB backdrop model + GrabCut, YOLO fallback)
+> was built and measured at mask IoU 0.983 on synthetic studio-backdrop renders, then
+> reverted. Those renders are that method's best case and a COCO-trained detector's worst;
+> it did not hold up on photographs of real objects. See [`BENCHMARK.md`](BENCHMARK.md).
 
 ### 3 — Reconstruction (`reconstruction_service.py`)
 
@@ -384,7 +380,7 @@ amber-on-near-black palette, and a pirate-voiced copy layer.
 **Unit tests** — `backend/tests/test_pipeline.py`, 12 tests, pytest, no MongoDB or YOLO
 weights required. They cover: camera axes match pixel axes; bearings keep gaps for skipped
 photos; two-ring pose assignment; shared-scale cropping; hull accuracy > 0.8 IoU on an
-analytic elongated box; backdrop segmentation on a gradient backdrop (> 0.97 IoU); openings
+analytic elongated box; openings
 preserved through a ring; busy backgrounds rejected as backdrops; hollow shells filled and
 sized to 28 studs in brick proportions; palette hex/RGB consistency; and brick packing
 covering every voxel exactly once.
@@ -461,9 +457,12 @@ Override the backend with `VITE_API_BASE_URL` in `.env.local`. CORS allows exact
 - **3D vision implemented from first principles.** Carving, camera construction, projection
   and focal-length derivation are hand-written NumPy; view poses, shared-scale cropping and
   two-ring captures were added after benchmarking exposed inconsistent geometry.
-- **Classical CV where it wins, deep learning as the fallback.** A class-agnostic backdrop
-  model (quadratic LAB fit + GrabCut) replaced YOLO as the primary segmenter after YOLO was
-  measured missing or rejecting 28% of photos; YOLO remains for cluttered backgrounds.
+- **Colour treated as a measurable problem.** Diagnosed a grey object rendering in tans by
+  reading a real run's voxel data (R−B of +65 on a neutral object), then fixed three
+  compounding causes: a doubled saturation boost with an unconditional floor lift, no white
+  balance, and a nearest-colour search weighting lightness equally with chroma. Illuminant
+  gains come from the backdrop, because an object-based estimate neutralises a genuinely
+  monochrome object. ΔE 20.2 → 12.8.
 - **Measurement-driven engineering.** A ground-truth benchmark (19 models, 152 photos per
   capture set) was built first; every change was kept or rejected on measured IoU, brick
   structure and latency, including parameter sweeps over normalization mode, vote threshold,
@@ -488,7 +487,8 @@ Override the backend with `VITE_API_BASE_URL` in `.env.local`. CORS allows exact
 
 | # | Area | Problem | Fix |
 |---|---|---|---|
-| 1 | Segmentation | YOLO (80 COCO classes) missed or rejected 28% of photos; partial masks (mean IoU 0.78) | Backdrop model + GrabCut primary, YOLO fallback → 100%, IoU 0.983 |
+| 1 | Segmentation | Only the largest mask was kept, so a part the detector reported separately (straw, handle) was amputated | Merge detections whose boxes touch the primary one |
+| 1b | Colour | Saturation boosted twice, once with an unconditional floor lift; no white balance; neutrals matched tinted bricks | Backdrop white balance, multiplicative-only gain, neutral-only matching for neutral samples |
 | 2 | Reconstruction | Each silhouette cropped to its own box and stretched, so views had different scales | One shared crop window for all views |
 | 3 | Reconstruction | Camera basis treated image *y* as up, so photos were carved upside-down relative to the tilt | Camera axes match pixel axes |
 | 4 | Reconstruction | A skipped photo shifted every later photo to the wrong bearing | Bearing from upload position (`view_index`) |

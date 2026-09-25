@@ -23,7 +23,7 @@ through the API — see [Benchmarks](#benchmarks),
 | # | Stage | What actually happens |
 |---|-------|----------------------|
 | 1 | **Upload** | Images are validated, HEIC/HEIF is transcoded to JPEG, and everything is stored in GridFS |
-| 2 | **Segment** | Class-agnostic **backdrop segmentation**: a quadratic CIE-LAB colour model fitted to the image border (absorbs lighting gradients and vignetting), refined with GrabCut. Falls back to YOLO11x-seg when the background is too busy to model |
+| 2 | **Segment** | **YOLO11x-seg** instance segmentation with CLAHE + unsharp pre-processing and a low-confidence retry. Detections whose boxes touch the primary one are merged, so a part reported separately (a straw in a cup, a handle) is kept. Masks are gated on bounding-box fill ratio, and a rejected photo leaves a gap in the bearings rather than shifting later views |
 | 3 | **Reconstruct** | Silhouette-based **visual hull carving** (space carving) over a 256³ grid, using an assumed turntable camera model. All silhouettes are cropped at one shared scale, each photo keeps the bearing of its position in the capture, and voxels are dropped as soon as a view rules them out. Colour is sampled from the photos; only the hull surface is stored |
 | 4 | **Voxelize** | Fill the hull solid, then Open3D voxelization in **brick proportions** (1 stud wide, 1 brick = 1.2 studs tall) sized so the longest side is 28 studs, light Gaussian simplification, and connected-component cleanup |
 | 5 | **LEGO Convert** | Colours quantized in CIE-LAB (k-means → a 36-colour palette of real LEGO colours), then greedy brick packing in both orientations. Hidden interior cells are colour wildcards, and layers alternate direction with a bonus for bridging bricks below, so the model is built in a running bond |
@@ -55,7 +55,7 @@ least two images survive.
 | Backend API | FastAPI + Uvicorn |
 | Database | MongoDB (Atlas or local) + GridFS |
 | Python DB driver | Motor (async PyMongo) |
-| Segmentation | OpenCV backdrop model + GrabCut; Ultralytics YOLO11x-seg fallback |
+| Segmentation | Ultralytics YOLO11x-seg (+ OpenCV CLAHE / unsharp pre-processing) |
 | 3D reconstruction | OpenCV + NumPy (hand-written visual hull carving) |
 | Shape simplification | Open3D + SciPy (`ndimage`) |
 | Color quantization | OpenCV (CIE-LAB) + SciPy (k-means) |
@@ -226,47 +226,53 @@ renders each one as a turntable capture that matches the backend's camera model:
 JPEGs on a studio backdrop with a lighting gradient, vignette, random tint and sensor
 noise, plus ground-truth masks and a 64³ solid occupancy grid. `benchmark/evaluate.py` then
 runs the backend's own stage functions on every capture. "Before" is the same harness run
-on the code as it stood before this work; timings are single-process CPU wall-clock on a
-4-core cloud VM.
+on the code as it stood before this work; "Now" is current `master`. Timings are
+single-process CPU wall-clock.
+
+> These captures are synthetic renders on a plain studio backdrop, and none of the 19 assets
+> is a COCO class, so the segmentation rows understate YOLO relative to how it behaves on
+> photographs of real objects. Full three-way tables, including a since-reverted backdrop
+> segmenter that scores better on this synthetic set, are in
+> [`docs/BENCHMARK.md`](docs/BENCHMARK.md).
 
 **8-photo capture (one ring):**
 
 | Metric | Before | After |
 | --- | --- | --- |
-| Captures reconstructed | 18 / 19 | 19 / 19 |
-| Photos segmented | 72% | 100% |
-| Segmentation mask IoU | 0.779 | 0.983 |
-| 3D IoU — carved hull (mean) | 0.398 | 0.689 |
-| 3D IoU — final voxel model | 0.374 | 0.616 |
-| Bricks per model | 2,861 | 934 |
-| Studs per brick | 3.12 | 3.97 |
-| Bricks bonded to ≥ 2 bricks below | 38% | 69% |
-| Colour error, ΔE (visible surface) | 20.2 | 17.2 |
-| Pipeline compute time per model | 43.2 s | 9.1 s |
+| Captures reconstructed | 18 / 19 | 18 / 19 |
+| Photos segmented | 72% | 76% |
+| Segmentation mask IoU | 0.779 | 0.854 |
+| 3D IoU — carved hull (mean) | 0.398 | 0.491 |
+| 3D IoU — final voxel model | 0.374 | 0.458 |
+| Bricks per model | 2,861 | 1,075 |
+| Studs per brick | 3.12 | 4.16 |
+| Bricks bonded to ≥ 2 bricks below | 38% | 75% |
+| Colour error, ΔE (visible surface) | 20.2 | 12.8 |
+| Pipeline compute time per model | 43.2 s | 9.4 s |
 
 **16-photo capture (level ring + high ring, as the UI recommends):**
 
 | Metric | Before | After |
 | --- | --- | --- |
-| Photos segmented | 72% | 100% |
-| 3D IoU — carved hull (mean) | 0.353 | 0.683 |
-| 3D IoU — final voxel model | 0.336 | 0.615 |
-| Bricks per model | 2,649 | 918 |
-| Bricks bonded to ≥ 2 bricks below | 36% | 70% |
-| Pipeline compute time per model | 56.1 s | 14.9 s |
+| Photos segmented | 72% | 77% |
+| 3D IoU — carved hull (mean) | 0.353 | 0.484 |
+| 3D IoU — final voxel model | 0.336 | 0.451 |
+| Bricks per model | 2,649 | 1,057 |
+| Bricks bonded to ≥ 2 bricks below | 36% | 74% |
+| Pipeline compute time per model | 56.1 s | 17.2 s |
 
 **Through the HTTP API** (`benchmark/e2e_api.py`: FastAPI + local MongoDB/GridFS, 8 photos,
 all 19 models, mean per run):
 
 | Metric | Before | After |
 | --- | --- | --- |
-| Runs completed | 18 / 19 | 19 / 19 |
-| Upload → finished model | 72.6 s | 8.7 s |
-| Point cloud stored in GridFS | 541 MB (5.0 M points) | 6.3 MB (90 k points) |
-| `GET /pointcloud` latency | 10.5 s | 0.20 s |
-| `GET /model` payload | 318 kB | 103 kB |
+| Runs completed | 18 / 19 | 18 / 19 |
+| Upload → finished model | 72.6 s | 9.3 s |
+| Point cloud stored in GridFS | 541 MB (5.0 M points) | 7.5 MB (107 k points) |
+| `GET /pointcloud` latency | 10.5 s | 0.15 s |
+| `GET /model` payload | 318 kB | 121 kB |
 
-Per stage (8 photos): segmentation 9.7 s → 4.9 s, reconstruction 11.1 s → 3.9 s,
+Per stage (8 photos): segmentation 9.7 s → 5.6 s, reconstruction 11.1 s → 3.4 s,
 voxelization 22.2 s → 0.3 s. Brick counts are not directly comparable — the old grid size
 depended on photo framing, the new one is fixed at 28 studs — so studs per brick is the
 fairer packing measure. One model (ToyCar) was dropped because its draped cloth cannot be
@@ -274,9 +280,14 @@ solid-filled into a reliable ground truth.
 
 What changed, and why each fix was needed:
 
-- **Segmentation** — YOLO (COCO classes) missed or rejected 28% of photos and often masked
-  only part of the object. A class-agnostic backdrop model + GrabCut now handles any object on
-  a plain background; YOLO stays as the fallback for busy backgrounds.
+- **Segmentation** — only the single largest mask used to be kept, so a part the detector
+  reported separately (a straw in a cup, a handle) was amputated before reconstruction.
+  Detections whose boxes touch the primary one are now merged.
+- **Colour** — saturation was boosted twice, once with an unconditional floor lift that gave
+  zero-saturation pixels a hue, and there was no white balance, so a grey-and-white object
+  photographed under warm light quantized to tans and browns. Gains are now estimated from
+  the backdrop, neutral samples match only neutral bricks, and the palette carries 52 colours
+  with a 7-level neutral ramp. ΔE 20.2 → 12.8.
 - **Consistent silhouette scale** — each silhouette used to be cropped to its own bounding
   box and stretched to fill the frame, so a fox seen end-on was scaled up to the size of its
   side view. All views now share one crop.
@@ -355,7 +366,7 @@ Bricked/
 │   │   │   └── model.py                   # Model, parts, pointcloud, voxels, status
 │   │   └── services/
 │   │       ├── upload_service.py          # Validation, HEIC transcode, GridFS storage
-│   │       ├── segmentation_service.py    # Backdrop model + GrabCut, YOLO fallback
+│   │       ├── segmentation_service.py    # YOLO11x-seg + mask merge, quality gating
 │   │       ├── reconstruction_service.py  # Visual hull carving + color sampling
 │   │       ├── voxel_service.py           # Open3D voxelization + simplification
 │   │       └── lego_service.py            # Color quantization + brick packing

@@ -1,33 +1,55 @@
 # Bricked — Benchmarks, Achievements and Accomplishments
 
 > Every number here is measured by the scripts in `benchmark/` against the code on
-> `master` (2026-09-24). "Before" is the same harness run on the code as it stood before
-> the benchmark-driven pass; raw JSON is in `benchmark/results/` (`orig*` = before,
-> `new*` = after). Architecture details are in [`BRICKED_OVERVIEW.md`](BRICKED_OVERVIEW.md).
+> `master`. Raw JSON is in `benchmark/results/`. Architecture details are in
+> [`BRICKED_OVERVIEW.md`](BRICKED_OVERVIEW.md).
+>
+> Three versions are compared throughout:
+>
+> | Column | What it is | Results files |
+> |---|---|---|
+> | **Original** | the code as it stood before any benchmark-driven work | `orig*`, `e2e_orig` |
+> | **Backdrop seg.** | a class-agnostic CIE-LAB backdrop model + GrabCut, since reverted | `new*`, `e2e_new` |
+> | **Current** | what is on `master` now: YOLO11x-seg, plus the colour pipeline below | `current*`, `e2e_current` |
+>
+> **Read the segmentation rows with care.** The captures are synthetic renders on a plain
+> studio backdrop, which is the exact case the backdrop segmenter was built for and the
+> case a COCO-trained detector is weakest on — these models are not COCO classes. The
+> benchmark therefore flatters the reverted segmenter and understates YOLO relative to its
+> behaviour on real photographs. The colour, geometry-simplification and performance rows
+> are not affected by that bias.
 
 ---
 
 ## Headline numbers
 
-| Metric | Before | After | Change |
+Current code against the original, 8-photo capture, 19 objects:
+
+| Metric | Original | Current | Change |
 |---|---|---|---|
-| Photos segmented successfully | 72% | 100% | +28 pts |
-| Segmentation mask IoU | 0.779 | 0.983 | +26% |
-| 3D reconstruction IoU (carved hull) | 0.398 | 0.689 | +73% |
-| 3D IoU of final voxel model | 0.374 | 0.616 | +65% |
-| Objects reconstructed (of 19) | 18 | 19 | failures eliminated |
-| Objects with hull IoU ≥ 0.6 (of 19) | 3 | 15 | 5× |
-| Upload → finished model, via API | 72.6 s | 8.7 s | 8.3× faster |
-| Slowest run, via API | 139.6 s | 11.8 s | 11.9× faster |
-| Pipeline compute per model | 43.2 s | 9.1 s | 4.7× faster |
-| Point cloud stored per run | 541 MB | 6.3 MB | 86× smaller |
-| Points stored per run | 5.0 M | 90 k | 56× fewer |
-| `GET /pointcloud` latency | 10.5 s | 0.20 s | 52× faster |
-| `GET /model` payload | 318 kB | 103 kB | 3.1× smaller |
-| Studs per brick | 3.12 | 3.97 | +27% |
-| Bricks bonded to ≥ 2 bricks below | 38% | 69% | +31 pts |
-| Colour error ΔE (visible surface) | 20.2 | 17.2 | −15% |
+| Segmentation mask IoU | 0.779 | 0.854 | +10% |
+| 3D reconstruction IoU (carved hull) | 0.398 | 0.491 | +23% |
+| 3D IoU of final voxel model | 0.374 | 0.458 | +22% |
+| **Colour error ΔE (visible surface)** | **20.2** | **12.8** | **−37%** |
+| Upload → finished model, via API | 72.6 s | 9.3 s | **7.8× faster** |
+| Pipeline compute per model | 43.2 s | 9.4 s | 4.6× faster |
+| Point cloud stored per run | 541 MB | 7.5 MB | **72× smaller** |
+| `GET /model` payload | 318 kB | 121 kB | 2.6× smaller |
+| Bricks per model | 2,861 | 1,075 | 2.7× fewer |
+| LEGO palette | 19 colours | 52 colours | +174% |
 | Unit tests | 0 | 12 | — |
+
+Where the current code stands against the reverted backdrop segmenter:
+
+| Metric | Backdrop seg. | Current | |
+|---|---|---|---|
+| Colour error ΔE | 17.2 | **12.8** | current is 26% better |
+| Segmentation pass rate | 100% | 76% | backdrop better *on this synthetic set* |
+| 3D IoU of final voxel model | 0.616 | 0.458 | follows from the segmentation gap |
+| Pipeline compute per model | 9.1 s | 9.4 s | equivalent |
+
+Colour is the one axis where the current code beats both predecessors, and it is the axis
+the synthetic benchmark measures most fairly.
 
 ---
 
@@ -62,67 +84,73 @@
 
 ## Results — 8-photo capture (19 objects, mean)
 
-| Metric | Before | After |
-|---|---|---|
-| Captures reconstructed | 18 / 19 | 19 / 19 |
-| Photos segmented | 72% | 100% |
-| Segmentation mask IoU | 0.779 | 0.983 |
-| 3D IoU — carved hull (mean) | 0.398 | 0.689 |
-| 3D IoU — carved hull (median) | 0.345 | 0.689 |
-| 3D IoU — final voxel model | 0.374 | 0.616 |
-| Voxels per model | 8,334 | 3,930 |
-| Bricks per model | 2,861 | 934 |
-| Studs per brick | 3.12 | 3.97 |
-| Bricks bonded to ≥ 2 below | 38% | 69% |
-| Bricks in largest connected build | 98.5% | 96.9% |
-| LEGO colours used | 4.1 | 5.4 |
-| Colour error ΔE (visible voxels) | 20.2 | 17.2 |
-| Segmentation time | 9.67 s | 4.86 s |
-| Reconstruction time | 11.08 s | 3.89 s |
-| Voxelization time | 22.21 s | 0.31 s |
-| Brick packing time | 0.25 s | 0.07 s |
-| Pipeline compute time | 43.22 s | 9.13 s |
+| Metric | Original | Backdrop seg. | Current |
+|---|---|---|---|
+| Captures reconstructed | 18 / 19 | 19 / 19 | 18 / 19 |
+| Photos segmented | 72% | 100% | 76% |
+| Segmentation mask IoU | 0.779 | 0.983 | 0.854 |
+| 3D IoU — carved hull (mean) | 0.398 | 0.689 | 0.491 |
+| 3D IoU — carved hull (median) | 0.345 | 0.689 | 0.566 |
+| 3D IoU — final voxel model | 0.374 | 0.616 | 0.458 |
+| Voxels per model | 8,334 | 3,930 | 4,701 |
+| Bricks per model | 2,861 | 934 | 1,075 |
+| Studs per brick | 3.12 | 3.97 | 4.16 |
+| Bricks bonded to ≥ 2 below | 38% | 69% | 75% |
+| Bricks in largest connected build | 98.5% | 96.9% | 98.1% |
+| LEGO colours used | 4.1 | 5.4 | 5.3 |
+| Colour error ΔE (visible voxels) | 20.2 | 17.2 | 12.8 |
+| Segmentation time | 9.67 s | 4.86 s | 5.63 s |
+| Reconstruction time | 11.08 s | 3.89 s | 3.36 s |
+| Voxelization time | 22.21 s | 0.31 s | 0.32 s |
+| Brick packing time | 0.25 s | 0.07 s | 0.07 s |
+| Pipeline compute time | 43.22 s | 9.13 s | 9.37 s |
 
-Stage speedups: segmentation 2.0×, reconstruction 2.8×, voxelization 72×, packing 3.6×.
-Brick counts are not strictly comparable (the old grid size depended on photo framing; the
-new one is fixed at 28 studs), so studs per brick is the fairer packing measure.
+Against the original the current code carves a 23% better hull, cuts colour error by 37%,
+and runs 4.6× faster overall — voxelization alone is 69× faster. Brick counts are not
+strictly comparable with the original (its grid size depended on photo framing; both later
+versions fix it at 28 studs), so studs per brick is the fairer packing measure.
 
 ## Results — 16-photo two-ring capture (19 objects, mean)
 
-| Metric | Before | After |
-|---|---|---|
-| Captures reconstructed | 19 / 19 | 19 / 19 |
-| Photos segmented | 72% | 100% |
-| Segmentation mask IoU | 0.827 | 0.983 |
-| 3D IoU — carved hull (mean) | 0.353 | 0.683 |
-| 3D IoU — carved hull (median) | 0.295 | 0.687 |
-| 3D IoU — final voxel model | 0.336 | 0.615 |
-| Bricks per model | 2,649 | 918 |
-| Studs per brick | 2.95 | 4.09 |
-| Bricks bonded to ≥ 2 below | 36% | 70% |
-| Bricks in largest connected build | 96.9% | 97.5% |
-| Colour error ΔE | 19.5 | 17.0 |
-| Pipeline compute time | 56.10 s | 14.91 s |
+| Metric | Original | Backdrop seg. | Current |
+|---|---|---|---|
+| Captures reconstructed | 19 / 19 | 19 / 19 | 19 / 19 |
+| Photos segmented | 72% | 100% | 77% |
+| Segmentation mask IoU | 0.827 | 0.983 | 0.842 |
+| 3D IoU — carved hull (mean) | 0.353 | 0.683 | 0.484 |
+| 3D IoU — carved hull (median) | 0.295 | 0.687 | 0.602 |
+| 3D IoU — final voxel model | 0.336 | 0.615 | 0.451 |
+| Bricks per model | 2,649 | 918 | 1,057 |
+| Studs per brick | 2.95 | 4.09 | 4.23 |
+| Bricks bonded to ≥ 2 below | 36% | 70% | 75% |
+| Bricks in largest connected build | 96.9% | 97.5% | 98.9% |
+| LEGO colours used | 4.2 | 5.2 | 5.2 |
+| Colour error ΔE (visible voxels) | 19.5 | 17.0 | 13.2 |
+| Pipeline compute time | 56.10 s | 14.91 s | 17.22 s |
+
+The second ring costs roughly 1.8× the compute for no IoU gain on this synthetic set, where
+every object is already fully visible from one ring. On real captures it constrains vertical
+geometry that a single ring leaves under-determined.
 
 ## Results — end-to-end through the HTTP API (8 photos, 19 runs, mean)
 
-| Metric | Before | After |
-|---|---|---|
-| Runs completed | 18 / 19 | 19 / 19 |
-| Upload request | 0.03 s | 0.02 s |
-| `POST /segment` | 9.4 s | 4.0 s |
-| `POST /reconstruct` | 32.6 s | 4.3 s |
-| `POST /voxelize` | 30.3 s | 0.33 s |
-| `POST /lego` | 0.29 s | 0.09 s |
-| Upload → finished model | 72.6 s | 8.7 s |
-| Point cloud in GridFS | 541 MB (5.0 M points) | 6.3 MB (90 k points) |
-| `GET /pointcloud` | 10.5 s, 765 kB | 0.20 s, 489 kB |
-| `GET /voxels` payload | 362 kB | 170 kB |
-| `GET /model` payload | 318 kB | 103 kB |
+| Metric | Original | Backdrop seg. | Current |
+|---|---|---|---|
+| Runs completed | 18 / 19 | 19 / 19 | 18 / 19 |
+| `POST /segment` | 9.4 s | 4.0 s | 5.2 s |
+| `POST /reconstruct` | 32.6 s | 4.3 s | 3.6 s |
+| `POST /voxelize` | 30.30 s | 0.33 s | 0.37 s |
+| `POST /lego` | 0.29 s | 0.09 s | 0.07 s |
+| Upload → finished model | 72.6 s | 8.7 s | 9.3 s |
+| Point cloud in GridFS | 541.0 MB | 6.3 MB | 7.5 MB |
+| Points stored per run | 5,031,739 | 89,974 | 107,026 |
+| `GET /pointcloud` | 10.55 s | 0.20 s | 0.15 s |
+| `GET /model` payload | 317,693 B | 102,614 B | 120,650 B |
+| Bricks per model | 2,869 | 936 | 1,071 |
 
-API-level reconstruction and voxelization speedups (7.6× and 92×) are larger than in the
-direct-call benchmark because the old code also serialized and re-parsed a ~541 MB JSON
-point cloud through GridFS between those stages.
+The API-level reconstruction and voxelization speedups are larger than in the direct-call
+benchmark because the original also serialized and re-parsed a ~541 MB JSON point cloud
+through GridFS between those stages.
 
 ## Per-object results (8 photos)
 
@@ -190,6 +218,13 @@ gradient, vignette and tint — the harder of the two):
 The backdrop segmenter runs ~0.54 s per photo on CPU and still hands cluttered-background
 photos to YOLO (verified on a synthetic clutter backdrop).
 
+**It was nevertheless reverted, and YOLO11x-seg is what ships.** The table above is measured
+on synthetic renders against a plain studio backdrop — the backdrop model's best case, and a
+COCO-trained detector's worst, since none of these 19 assets is a COCO class. On real
+photographs of real objects the ordering did not hold up, so the current code segments with
+YOLO11x-seg and reaches mask IoU 0.854 / 76% pass rate on this synthetic set. Reproducing
+the comparison on photographed objects with hand-labelled masks is the outstanding work.
+
 **Voxel stage** (cached hulls, 19 objects; the σ and k-means rows were measured before
 stud sizing was added, the outlier-removal rows after):
 
@@ -224,15 +259,16 @@ single-orientation packer: studs per brick 3.12 → 3.97, bonded 38% → 69%.)
 - **Voxelization 72× faster** (22.2 s → 0.31 s): no outlier removal on millions of points,
   a far smaller input cloud, and a single distance-transform colour fill instead of
   per-voxel neighbour search.
-- **Segmentation 2× faster** (9.7 s → 4.9 s per 8 photos): the backdrop model + GrabCut at
-  640 px avoids YOLO11x inference (and its low-confidence retry) on CPU for plain backdrops.
+- **Segmentation 1.7× faster** (9.7 s → 5.6 s per 8 photos): a single merged YOLO pass
+  replaces the original's repeated low-confidence retries.
 
 ---
 
 ## Bugs found and fixed through the benchmark
 
-1. **YOLO-only segmentation** missed or rejected 28% of photos and gave partial masks → added
-   a class-agnostic backdrop segmenter; 100% pass rate, mask IoU 0.983.
+1. **Segmentation kept only the single largest mask**, so a part the detector reported
+   separately — a straw in a cup, a handle — was amputated before reconstruction → merge
+   detections whose boxes touch the primary one.
 2. **Per-view silhouette rescaling** gave every view a different scale → one shared crop.
 3. **Camera basis inverted image *y*** relative to pixel coordinates → corrected axes.
 4. **Skipped photos shifted later bearings** → bearings from upload position.
@@ -266,17 +302,24 @@ single-orientation packer: studs per brick 3.12 → 3.97, bonded 38% → 69%.)
   multi-hundred-brick model renders in one draw call, with leak-free WebGL teardown.
 
 **Accuracy**
-- Raised 3D reconstruction accuracy 73% (0.40 → 0.69 IoU) on a 19-object ground-truth
-  benchmark; objects above 0.6 IoU went from 3 to 15.
-- Designed a class-agnostic segmenter (quadratic CIE-LAB backdrop model + GrabCut, YOLO11
-  fallback) that raised photo acceptance from 72% to 100% and mask IoU from 0.78 to 0.98,
-  where YOLO had returned no detection at all on 26% of photos.
+- Raised 3D reconstruction accuracy 23% (0.398 → 0.491 mean hull IoU) on a 19-object
+  ground-truth benchmark; objects above 0.6 IoU went from 3 to 7, above 0.5 from 6 to 12.
+- Cut colour error 37% (ΔE 20.2 → 12.8) by diagnosing three compounding defects from a real
+  run's data: a saturation boost applied twice with an unconditional floor lift that gave
+  zero-saturation pixels a hue, no white-balance stage at all, and a nearest-colour search
+  that weighted lightness equally with chroma so neutral grey matched Dark Tan over Dark
+  Stone Gray.
+- Estimated the illuminant from the backdrop rather than the object, after measuring that an
+  object-based estimate neutralises a genuinely monochrome object — a red object leads any
+  grey-world estimator to conclude the light is red.
+- Expanded the LEGO palette 19 → 52 real colours, scoring candidates against the existing
+  set and rejecting 5 as perceptually redundant; the neutral ramp went from 4 lightness
+  levels to 7, cutting grey-ramp quantization error 26%.
 - Fixed silhouette-scale, camera-axis and view-bearing bugs in the carver and added
-  two-ring (level + overhead) capture support; hull IoU on 16-photo captures 0.35 → 0.68.
-- Took end-to-end completion from 18/19 to 19/19 objects.
+  two-ring (level + overhead) capture support; hull IoU on 16-photo captures 0.353 → 0.484.
 
 **Performance**
-- Cut upload-to-model latency 8.3× (72.6 s → 8.7 s) and worst case 11.9× (139.6 s → 11.8 s)
+- Cut upload-to-model latency 7.8× (72.6 s → 9.3 s) and worst case 9.6× (139.6 s → 14.5 s)
   on CPU.
 - Reduced per-run storage 86× (541 MB → 6.3 MB) with surface-only point clouds, and point-cloud
   API latency 52× (10.5 s → 0.20 s).
