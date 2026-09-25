@@ -1,0 +1,752 @@
+{
+  "summary": {
+    "objects": 19,
+    "completed": 19,
+    "seg_pass_rate": 0.7730263157894737,
+    "seg_mask_iou": 0.8418808561157087,
+    "seg_confidence": 0.4955033907466803,
+    "iou3d_hull": 0.4837565609514582,
+    "iou3d_hull_median": 0.6023485532795244,
+    "iou3d_voxels": 0.4513471865605415,
+    "voxels": 4653.526315789473,
+    "bricks": 1056.5263157894738,
+    "studs_per_brick": 4.232768526274969,
+    "colors": 5.2105263157894735,
+    "bond_ratio": 0.7510196556322947,
+    "connected": 0.989453843890482,
+    "delta_e": 13.238512741891961,
+    "t_segment": 11.240834668420767,
+    "t_reconstruct": 5.605173173684307,
+    "t_voxelize": 0.30561953684216286,
+    "t_lego": 0.0646132368419785,
+    "t_total": 17.216240615789214
+  },
+  "objects": [
+    {
+      "name": "AntiqueCamera",
+      "views": 16,
+      "t_segment": 14.383647599999676,
+      "seg_pass": 0.375,
+      "seg_iou": 0.45614726574455383,
+      "seg_conf": 0.32911666666666667,
+      "skipped": [
+        {
+          "view": 0,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 1,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 2,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 4,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 6,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 7,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 9,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 12,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 14,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 15,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        }
+      ],
+      "t_reconstruct": 3.14590120000139,
+      "points": 77339,
+      "iou3d": 0.051320137521279084,
+      "t_voxelize": 0.6729067999986,
+      "voxels": 4715,
+      "iou3d_voxels": 0.05052320050734595,
+      "t_lego": 0.11794730000110576,
+      "bricks": 1095,
+      "studs_per_brick": 4.30593607305936,
+      "colors": 4,
+      "bond_ratio": 0.7310838445807771,
+      "connected": 0.9926940639269406,
+      "delta_e": 11.596052169799805,
+      "t_total": 18.320402900000772
+    },
+    {
+      "name": "Avocado",
+      "views": 16,
+      "t_segment": 10.205150600002526,
+      "seg_pass": 0.9375,
+      "seg_iou": 0.9808833588667304,
+      "seg_conf": 0.5681533333333333,
+      "skipped": [
+        {
+          "view": 14,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        }
+      ],
+      "t_reconstruct": 6.862256100001105,
+      "points": 133051,
+      "iou3d": 0.7431399665186694,
+      "t_voxelize": 0.3514735999997356,
+      "voxels": 5543,
+      "iou3d_voxels": 0.6849983368444396,
+      "t_lego": 0.058704700000816956,
+      "bricks": 1181,
+      "studs_per_brick": 4.693480101608806,
+      "colors": 6,
+      "bond_ratio": 0.8295142071494043,
+      "connected": 0.995766299745978,
+      "delta_e": 19.607099533081055,
+      "t_total": 17.477585000004183
+    },
+    {
+      "name": "BarramundiFish",
+      "views": 16,
+      "t_segment": 8.692546800000855,
+      "seg_pass": 1.0,
+      "seg_iou": 0.9461855753095074,
+      "seg_conf": 0.6657875,
+      "skipped": [],
+      "t_reconstruct": 5.227851899999223,
+      "points": 62331,
+      "iou3d": 0.698434004474273,
+      "t_voxelize": 0.1627812000006088,
+      "voxels": 865,
+      "iou3d_voxels": 0.4898301211244001,
+      "t_lego": 0.02766929999779677,
+      "bricks": 244,
+      "studs_per_brick": 3.5450819672131146,
+      "colors": 4,
+      "bond_ratio": 0.6684210526315789,
+      "connected": 0.9549180327868853,
+      "delta_e": 11.878874778747559,
+      "t_total": 14.110849199998484
+    },
+    {
+      "name": "BoomBox",
+      "views": 16,
+      "t_segment": 11.618713799998659,
+      "seg_pass": 0.8125,
+      "seg_iou": 0.7783865327218715,
+      "seg_conf": 0.4155769230769231,
+      "skipped": [
+        {
+          "view": 4,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 12,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 15,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        }
+      ],
+      "t_reconstruct": 6.860166499998741,
+      "points": 172264,
+      "iou3d": 0.34026008453483747,
+      "t_voxelize": 0.5064230999996653,
+      "voxels": 6401,
+      "iou3d_voxels": 0.3955648808016496,
+      "t_lego": 0.08578850000048988,
+      "bricks": 1470,
+      "studs_per_brick": 4.354421768707483,
+      "colors": 6,
+      "bond_ratio": 0.7578369905956113,
+      "connected": 0.9870748299319728,
+      "delta_e": 8.039185523986816,
+      "t_total": 19.071091899997555
+    },
+    {
+      "name": "CesiumMilkTruck",
+      "views": 16,
+      "t_segment": 11.423878900001,
+      "seg_pass": 0.75,
+      "seg_iou": 0.9595339779992847,
+      "seg_conf": 0.4594499999999999,
+      "skipped": [
+        {
+          "view": 9,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 11,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 12,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 15,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        }
+      ],
+      "t_reconstruct": 5.714537400002882,
+      "points": 129672,
+      "iou3d": 0.7050050438426321,
+      "t_voxelize": 0.34627399999953923,
+      "voxels": 4931,
+      "iou3d_voxels": 0.672191822575729,
+      "t_lego": 0.06483529999968596,
+      "bricks": 1078,
+      "studs_per_brick": 4.574211502782932,
+      "colors": 6,
+      "bond_ratio": 0.7636566332218506,
+      "connected": 0.9860853432282004,
+      "delta_e": 11.346284866333008,
+      "t_total": 17.549525600003108
+    },
+    {
+      "name": "ChairDamaskPurplegold",
+      "views": 16,
+      "t_segment": 11.063471999998,
+      "seg_pass": 1.0,
+      "seg_iou": 0.7274837656646023,
+      "seg_conf": 0.41755624999999996,
+      "skipped": [],
+      "t_reconstruct": 5.85752710000088,
+      "points": 46192,
+      "iou3d": 0.20553006236027768,
+      "t_voxelize": 0.04585600000064005,
+      "voxels": 1703,
+      "iou3d_voxels": 0.2339778453615113,
+      "t_lego": 0.03809030000047642,
+      "bricks": 417,
+      "studs_per_brick": 4.083932853717027,
+      "colors": 4,
+      "bond_ratio": 0.7631578947368421,
+      "connected": 0.9928057553956835,
+      "delta_e": 14.887667655944824,
+      "t_total": 17.004945399999997
+    },
+    {
+      "name": "ChronographWatch",
+      "views": 16,
+      "t_segment": 13.911374899998918,
+      "seg_pass": 0.5625,
+      "seg_iou": 0.8033757848331077,
+      "seg_conf": 0.21438888888888888,
+      "skipped": [
+        {
+          "view": 3,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 5,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 7,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 8,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 9,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 11,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 13,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        }
+      ],
+      "t_reconstruct": 4.334950300002674,
+      "points": 149873,
+      "iou3d": 0.23015631564460284,
+      "t_voxelize": 0.3803576000027533,
+      "voxels": 4377,
+      "iou3d_voxels": 0.22414303932808616,
+      "t_lego": 0.07457620000059251,
+      "bricks": 1161,
+      "studs_per_brick": 3.7700258397932815,
+      "colors": 6,
+      "bond_ratio": 0.6622448979591836,
+      "connected": 0.9810508182601206,
+      "delta_e": 13.651055335998535,
+      "t_total": 18.70125900000494
+    },
+    {
+      "name": "CommercialRefrigerator",
+      "views": 16,
+      "t_segment": 11.869302600000083,
+      "seg_pass": 0.625,
+      "seg_iou": 0.9832695277195885,
+      "seg_conf": 0.50442,
+      "skipped": [
+        {
+          "view": 0,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 4,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 6,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 8,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 10,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 12,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        }
+      ],
+      "t_reconstruct": 5.507135299998481,
+      "points": 132473,
+      "iou3d": 0.6561799821982137,
+      "t_voxelize": 0.36259159999826807,
+      "voxels": 8430,
+      "iou3d_voxels": 0.6227330668057246,
+      "t_lego": 0.0898760999989463,
+      "bricks": 1757,
+      "studs_per_brick": 4.797951052931133,
+      "colors": 4,
+      "bond_ratio": 0.8317422434367542,
+      "connected": 0.9988616960728515,
+      "delta_e": 13.273508071899414,
+      "t_total": 17.828905599995778
+    },
+    {
+      "name": "DamagedHelmet",
+      "views": 16,
+      "t_segment": 13.436537300000055,
+      "seg_pass": 0.6875,
+      "seg_iou": 0.9698725845412938,
+      "seg_conf": 0.2773181818181818,
+      "skipped": [
+        {
+          "view": 0,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 3,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 5,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 8,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 9,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        }
+      ],
+      "t_reconstruct": 7.007939899998746,
+      "points": 213005,
+      "iou3d": 0.6457049133052161,
+      "t_voxelize": 0.5724811000000045,
+      "voxels": 9342,
+      "iou3d_voxels": 0.6191551708214037,
+      "t_lego": 0.10875759999908041,
+      "bricks": 2174,
+      "studs_per_brick": 4.297148114075437,
+      "colors": 6,
+      "bond_ratio": 0.7570093457943925,
+      "connected": 0.984820607175713,
+      "delta_e": 8.881172180175781,
+      "t_total": 21.125715899997886
+    },
+    {
+      "name": "Duck",
+      "views": 16,
+      "t_segment": 11.055610600000364,
+      "seg_pass": 1.0,
+      "seg_iou": 0.889506548810293,
+      "seg_conf": 0.46090625,
+      "skipped": [],
+      "t_reconstruct": 8.002090300000418,
+      "points": 154501,
+      "iou3d": 0.6038140008799759,
+      "t_voxelize": 0.4985856999992393,
+      "voxels": 6395,
+      "iou3d_voxels": 0.6229325769146847,
+      "t_lego": 0.0755325999998604,
+      "bricks": 1359,
+      "studs_per_brick": 4.705665930831493,
+      "colors": 6,
+      "bond_ratio": 0.8104026845637584,
+      "connected": 0.9955849889624724,
+      "delta_e": 12.031569480895996,
+      "t_total": 19.63181919999988
+    },
+    {
+      "name": "Fox",
+      "views": 16,
+      "t_segment": 8.325286700001016,
+      "seg_pass": 0.875,
+      "seg_iou": 0.9316060134299794,
+      "seg_conf": 0.8857714285714285,
+      "skipped": [
+        {
+          "view": 11,
+          "reason": "Mask fill ratio too low (0.29 < 0.3) \u2014 the segmentation mask covers too little o"
+        },
+        {
+          "view": 13,
+          "reason": "Mask fill ratio too low (0.29 < 0.3) \u2014 the segmentation mask covers too little o"
+        }
+      ],
+      "t_reconstruct": 4.034124699999666,
+      "points": 40496,
+      "iou3d": 0.7681994590144655,
+      "t_voxelize": 0.03797549999944749,
+      "voxels": 824,
+      "iou3d_voxels": 0.5336397495839607,
+      "t_lego": 0.021526600001379848,
+      "bricks": 278,
+      "studs_per_brick": 2.964028776978417,
+      "colors": 6,
+      "bond_ratio": 0.5402843601895735,
+      "connected": 0.9748201438848921,
+      "delta_e": 12.615043640136719,
+      "t_total": 12.418913500001509
+    },
+    {
+      "name": "GlamVelvetSofa",
+      "views": 16,
+      "t_segment": 11.616737099997408,
+      "seg_pass": 0.875,
+      "seg_iou": 0.9634814824888883,
+      "seg_conf": 0.4640071428571429,
+      "skipped": [
+        {
+          "view": 2,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 9,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        }
+      ],
+      "t_reconstruct": 4.482324000000517,
+      "points": 68058,
+      "iou3d": 0.6320169252468265,
+      "t_voxelize": 0.19522389999838197,
+      "voxels": 1843,
+      "iou3d_voxels": 0.5228556367196325,
+      "t_lego": 0.03732559999843943,
+      "bricks": 427,
+      "studs_per_brick": 4.31615925058548,
+      "colors": 4,
+      "bond_ratio": 0.7311178247734139,
+      "connected": 0.9882903981264637,
+      "delta_e": 12.613590240478516,
+      "t_total": 16.331610599994747
+    },
+    {
+      "name": "Lantern",
+      "views": 16,
+      "t_segment": 13.720453300000372,
+      "seg_pass": 0.1875,
+      "seg_iou": 0.08430494658355742,
+      "seg_conf": 0.12653333333333333,
+      "skipped": [
+        {
+          "view": 0,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 1,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 2,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 3,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 4,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 5,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 6,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 7,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 8,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 9,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 10,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 12,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 14,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        }
+      ],
+      "t_reconstruct": 1.248160300001473,
+      "points": 11027,
+      "iou3d": 0.0365059354974262,
+      "t_voxelize": 0.023767300001054537,
+      "voxels": 2343,
+      "iou3d_voxels": 0.03880704275961193,
+      "t_lego": 0.039223699997819494,
+      "bricks": 670,
+      "studs_per_brick": 3.497014925373134,
+      "colors": 6,
+      "bond_ratio": 0.7060702875399361,
+      "connected": 0.9985074626865672,
+      "delta_e": 13.852972984313965,
+      "t_total": 15.031604600000719
+    },
+    {
+      "name": "MaterialsVariantsShoe",
+      "views": 16,
+      "t_segment": 12.471510399998806,
+      "seg_pass": 0.375,
+      "seg_iou": 0.9600797493223086,
+      "seg_conf": 0.5196333333333333,
+      "skipped": [
+        {
+          "view": 0,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 1,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 3,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 5,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 7,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 8,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 9,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 10,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 13,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 15,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        }
+      ],
+      "t_reconstruct": 3.0913029000003007,
+      "points": 91489,
+      "iou3d": 0.2753888380603843,
+      "t_voxelize": 0.2110530000027211,
+      "voxels": 2624,
+      "iou3d_voxels": 0.2868544123627491,
+      "t_lego": 0.04142949999732082,
+      "bricks": 619,
+      "studs_per_brick": 4.239095315024232,
+      "colors": 6,
+      "bond_ratio": 0.6672661870503597,
+      "connected": 0.9967689822294022,
+      "delta_e": 11.803614616394043,
+      "t_total": 15.815295799999149
+    },
+    {
+      "name": "PotOfCoals",
+      "views": 16,
+      "t_segment": 9.013985099998536,
+      "seg_pass": 1.0,
+      "seg_iou": 0.9888818362866663,
+      "seg_conf": 0.5741375,
+      "skipped": [],
+      "t_reconstruct": 10.769291699998575,
+      "points": 237801,
+      "iou3d": 0.6900645824825687,
+      "t_voxelize": 0.59026829999857,
+      "voxels": 9343,
+      "iou3d_voxels": 0.7090814878230113,
+      "t_lego": 0.09704820000115433,
+      "bricks": 1952,
+      "studs_per_brick": 4.786372950819672,
+      "colors": 6,
+      "bond_ratio": 0.8163493840985442,
+      "connected": 0.9907786885245902,
+      "delta_e": 15.86286735534668,
+      "t_total": 20.470593299996835
+    },
+    {
+      "name": "SheenChair",
+      "views": 16,
+      "t_segment": 10.403141399998276,
+      "seg_pass": 0.8125,
+      "seg_iou": 0.7515817166494055,
+      "seg_conf": 0.5022923076923077,
+      "skipped": [
+        {
+          "view": 1,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 2,
+          "reason": "Mask fill ratio too low (0.21 < 0.3) \u2014 the segmentation mask covers too little o"
+        },
+        {
+          "view": 4,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        }
+      ],
+      "t_reconstruct": 4.633807700000034,
+      "points": 36857,
+      "iou3d": 0.24350454272344918,
+      "t_voxelize": 0.04688950000127079,
+      "voxels": 3131,
+      "iou3d_voxels": 0.2562102927829507,
+      "t_lego": 0.04872850000174367,
+      "bricks": 876,
+      "studs_per_brick": 3.574200913242009,
+      "colors": 5,
+      "bond_ratio": 0.8067567567567567,
+      "connected": 0.9920091324200914,
+      "delta_e": 12.522160530090332,
+      "t_total": 15.132567100001324
+    },
+    {
+      "name": "SheenWoodLeatherSofa",
+      "views": 16,
+      "t_segment": 10.246286199999304,
+      "seg_pass": 1.0,
+      "seg_iou": 0.9726531633337067,
+      "seg_conf": 0.5180687500000001,
+      "skipped": [],
+      "t_reconstruct": 6.74175109999851,
+      "points": 114004,
+      "iou3d": 0.6023485532795244,
+      "t_voxelize": 0.32503910000014,
+      "voxels": 2741,
+      "iou3d_voxels": 0.5668199153649235,
+      "t_lego": 0.044718100001773564,
+      "bricks": 639,
+      "studs_per_brick": 4.289514866979656,
+      "colors": 4,
+      "bond_ratio": 0.725925925925926,
+      "connected": 0.9968701095461658,
+      "delta_e": 16.929550170898438,
+      "t_total": 17.357794499999727
+    },
+    {
+      "name": "SpecularSilkPouf",
+      "views": 16,
+      "t_segment": 11.576723099999072,
+      "seg_pass": 0.8125,
+      "seg_iou": 0.9826007036004795,
+      "seg_conf": 0.6620153846153846,
+      "skipped": [
+        {
+          "view": 4,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 5,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        },
+        {
+          "view": 6,
+          "reason": "No objects detected \u2014 ensure the object is clearly visible, well-lit, and contra"
+        }
+      ],
+      "t_reconstruct": 6.7765330000001995,
+      "points": 161319,
+      "iou3d": 0.483843180099168,
+      "t_voxelize": 0.3919022000009136,
+      "voxels": 6870,
+      "iou3d_voxels": 0.5004718916700862,
+      "t_lego": 0.0828947000009066,
+      "bricks": 1455,
+      "studs_per_brick": 4.721649484536083,
+      "colors": 5,
+      "bond_ratio": 0.8633034987794955,
+      "connected": 0.9951890034364261,
+      "delta_e": 14.451774597167969,
+      "t_total": 18.82805300000109
+    },
+    {
+      "name": "WaterBottle",
+      "views": 16,
+      "t_segment": 8.541500300001644,
+      "seg_pass": 1.0,
+      "seg_iou": 0.8659017322926391,
+      "seg_conf": 0.8494312500000001,
+      "skipped": [],
+      "t_reconstruct": 6.200638899998012,
+      "points": 68589,
+      "iou3d": 0.5799581303939161,
+      "t_voxelize": 0.08492169999954058,
+      "voxels": 5996,
+      "iou3d_voxels": 0.5448060544983896,
+      "t_lego": 0.0729786999982025,
+      "bricks": 1222,
+      "studs_per_brick": 4.9067103109656305,
+      "colors": 5,
+      "bond_ratio": 0.8372294372294372,
+      "connected": 0.9967266775777414,
+      "delta_e": 15.687698364257812,
+      "t_total": 14.900039599997399
+    }
+  ]
+}

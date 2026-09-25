@@ -17,9 +17,14 @@ Needs pyrender + an OSMesa build of Mesa:
 """
 import argparse
 import os
+import sys
 from pathlib import Path
 
-os.environ.setdefault("PYOPENGL_PLATFORM", "osmesa")
+# Headless Linux renders through OSMesa.  Windows has no OSMesa build and
+# pyrender rejects any platform name but osmesa/egl, so leave the variable
+# unset there and let PyOpenGL pick the native WGL context.
+if sys.platform != "win32":
+    os.environ.setdefault("PYOPENGL_PLATFORM", "osmesa")
 
 import numpy as np
 import pyrender
