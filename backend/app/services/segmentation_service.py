@@ -1,21 +1,16 @@
 """
-Segmentation stage.
+YOLO segmentation stage.
 
 For each uploaded image:
-  1. Backdrop segmentation (preferred).  Bricked asks for a plain backdrop, so
-     the backdrop is modelled from the image border — a smooth quadratic
-     colour surface in CIE-LAB, which absorbs lighting gradients and vignetting
-     — and every pixel that departs from it is foreground.  The coarse mask is
-     refined with GrabCut.  This is class-agnostic: it works for objects YOLO
-     has no COCO class for (an avocado, a boom box, a lantern).
-  2. YOLO fallback.  When the border is too busy to model as a backdrop, run
-     YOLO11-seg (after CLAHE + unsharp pre-processing), take the largest
-     instance, and gate it on bounding-box fill ratio:
-       fill ratio = mask pixels inside bounding box / bounding box area.
-       Too low → fragmented / missed object.  Too high → bbox flooded w/ background.
-  3. Apply the mask — background becomes transparent (RGBA PNG)
-  4. Store the masked image back to GridFS
-  5. Update the run document with segmented image references
+  1. Pre-process (CLAHE contrast + unsharp sharpening) to maximise YOLO confidence
+  2. Run YOLOv11-seg to detect all objects and their masks
+  3. Pick the most prominent object (largest mask area)
+  4. Discard images whose mask fill ratio falls outside acceptable bounds
+     Fill ratio = mask pixels inside bounding box / bounding box area.
+     Too low → fragmented / missed object.  Too high → bbox flooded w/ background.
+  5. Apply the mask — background becomes transparent (RGBA PNG)
+  6. Store the masked image back to GridFS
+  7. Update the run document with segmented image references
 """
 import io
 import asyncio
@@ -40,16 +35,6 @@ CONF_RETRY     = 0.10   # fallback threshold if nothing found at CONF_THRESHOLD
 # mask (too low) or a flood-fill that captured the background (too high).
 MIN_FILL_RATIO = 0.40   # below → mask too sparse / object not covered
 MAX_FILL_RATIO = 0.98   # above → mask swallowed the whole bbox region
-
-
-# Backdrop model
-BORDER_FRAC      = 0.04   # width of the image border sampled as backdrop
-BACKDROP_MAX_MAD = 4.0    # border residual (LAB units) above which the backdrop is "busy"
-FG_SIGMAS        = 6.0    # foreground = residual above this many robust sigmas…
-FG_MIN_DELTA     = 8.0    # …and at least this many LAB units from the backdrop
-MIN_AREA_FRAC    = 0.005  # reject masks smaller than this fraction of the image
-MAX_AREA_FRAC    = 0.90   # …or larger than this
-GRABCUT_SIDE     = 640    # GrabCut runs at this resolution (long side) for speed
 
 
 @lru_cache(maxsize=1)
@@ -120,120 +105,22 @@ def _compute_fill_ratio(
     return fill
 
 
-def _backdrop_mask(bgr: np.ndarray) -> tuple[np.ndarray, float] | None:
-    """
-    Class-agnostic foreground mask for an object on a plain backdrop.
-
-    Returns (mask uint8 0/255, backdrop residual MAD) or None when the image
-    border is too busy to be a plain backdrop.
-    """
-    import cv2
-    from scipy.ndimage import binary_fill_holes
-
-    h, w = bgr.shape[:2]
-    scale = min(1.0, GRABCUT_SIDE / max(h, w))
-    small = cv2.resize(bgr, (int(round(w * scale)), int(round(h * scale))), interpolation=cv2.INTER_AREA)
-    sh, sw = small.shape[:2]
-    lab = cv2.cvtColor(small, cv2.COLOR_BGR2LAB).astype(np.float32)
-
-    # Fit a quadratic colour surface to the border pixels, per LAB channel
-    b = max(2, int(round(min(sh, sw) * BORDER_FRAC)))
-    border = np.zeros((sh, sw), dtype=bool)
-    border[:b, :] = border[-b:, :] = border[:, :b] = border[:, -b:] = True
-    yy, xx = np.mgrid[0:sh, 0:sw].astype(np.float32)
-    yn, xn = yy / sh - 0.5, xx / sw - 0.5
-    basis = np.stack([np.ones_like(xn), xn, yn, xn * xn, yn * yn, xn * yn], axis=-1)
-    A = basis[border]
-    coef, *_ = np.linalg.lstsq(A, lab[border], rcond=None)
-    backdrop = basis @ coef                                   # (sh, sw, 3)
-
-    resid = np.linalg.norm(lab - backdrop, axis=-1)
-    br = resid[border]
-    mad = float(np.median(np.abs(br - np.median(br)))) * 1.4826
-    # Busy border (clutter, or the object itself running off-frame) → not a backdrop
-    if mad > BACKDROP_MAX_MAD or (br > FG_MIN_DELTA * 2).mean() > 0.10:
-        return None
-
-    thresh = max(FG_SIGMAS * mad + float(np.median(br)), FG_MIN_DELTA)
-    coarse = (resid > thresh).astype(np.uint8)
-    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    coarse = cv2.morphologyEx(coarse, cv2.MORPH_OPEN, k)
-    coarse = cv2.morphologyEx(coarse, cv2.MORPH_CLOSE, k)
-    if coarse.sum() < MIN_AREA_FRAC * sh * sw:
-        return None
-
-    # GrabCut: confident pixels seed the colour models, the band between refines
-    gc = np.full((sh, sw), cv2.GC_PR_BGD, dtype=np.uint8)
-    gc[resid < 0.5 * thresh] = cv2.GC_BGD
-    gc[coarse > 0] = cv2.GC_PR_FGD
-    gc[cv2.erode(coarse, k, iterations=2) > 0] = cv2.GC_FGD
-    gc[border] = cv2.GC_BGD
-    try:
-        bgd, fgd = np.zeros((1, 65), np.float64), np.zeros((1, 65), np.float64)
-        cv2.grabCut(small, gc, None, bgd, fgd, 3, cv2.GC_INIT_WITH_MASK)
-        refined = np.isin(gc, (cv2.GC_FGD, cv2.GC_PR_FGD)).astype(np.uint8)
-    except cv2.error:
-        refined = coarse
-
-    # Keep the main object: largest component plus any sizeable pieces
-    n, labels, stats, _ = cv2.connectedComponentsWithStats(refined, connectivity=8)
-    if n <= 1:
-        return None
-    areas = stats[1:, cv2.CC_STAT_AREA]
-    keep = 1 + np.where(areas >= 0.05 * areas.max())[0]
-    obj = np.isin(labels, keep)
-    # Fill pin-holes, but leave genuine openings (a mug handle, a watch strap)
-    # where the backdrop shows through
-    holes = binary_fill_holes(obj) & ~obj
-    n_h, h_labels, h_stats, _ = cv2.connectedComponentsWithStats(holes.astype(np.uint8), connectivity=4)
-    small = 1 + np.where(h_stats[1:, cv2.CC_STAT_AREA] < 0.01 * obj.sum())[0]
-    refined = (obj | np.isin(h_labels, small)).astype(np.uint8)
-
-    mask = cv2.resize(refined * 255, (w, h), interpolation=cv2.INTER_LINEAR)
-    return (mask > 127).astype(np.uint8) * 255, mad
-
-
-def _encode_rgba(bgr: np.ndarray, binary_mask: np.ndarray) -> bytes:
-    import cv2
-    from PIL import Image
-
-    rgb  = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-    rgba = np.dstack([rgb, binary_mask])
-    buf  = io.BytesIO()
-    Image.fromarray(rgba, mode="RGBA").save(buf, format="PNG")
-    return buf.getvalue()
-
-
 def _segment_image(image_bytes: bytes) -> tuple[bytes, dict]:
     """
-    Segment the object in raw image bytes — backdrop model first, YOLO fallback.
+    Pre-process then run YOLO segmentation on raw image bytes.
 
     Returns:
         masked_png_bytes : RGBA PNG with background removed
-        meta             : method, fill_ratio, confidence, bounding box
+        meta             : fill_ratio, confidence, bounding box
     Raises:
         ValueError if no object is detected or mask quality is unacceptable.
     """
     import cv2
-
-    bgr   = _decode_image(image_bytes)
-    h, w  = bgr.shape[:2]
-
-    backdrop = _backdrop_mask(bgr)
-    if backdrop is not None:
-        binary_mask, mad = backdrop
-        area = (binary_mask > 0).mean()
-        if MIN_AREA_FRAC <= area <= MAX_AREA_FRAC:
-            ys, xs = np.where(binary_mask > 0)
-            box = [float(xs.min()), float(ys.min()), float(xs.max() + 1), float(ys.max() + 1)]
-            return _encode_rgba(bgr, binary_mask), {
-                "method":     "backdrop",
-                "fill_ratio": round(_compute_fill_ratio(binary_mask, box), 4),
-                "confidence": round(float(np.clip(1.0 - mad / BACKDROP_MAX_MAD, 0.0, 1.0)), 4),
-                "box":        box,
-            }
+    from PIL import Image
 
     model = _load_model()
+    bgr   = _decode_image(image_bytes)
+    h, w  = bgr.shape[:2]
 
     bgr_proc = _preprocess_for_detection(bgr)
 
@@ -274,8 +161,14 @@ def _segment_image(image_bytes: bytes) -> tuple[bytes, dict]:
             "use a plain background that contrasts with the object"
         )
 
-    return _encode_rgba(bgr, binary_mask), {
-        "method":     "yolo",
+    rgb     = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    rgba    = np.dstack([rgb, binary_mask])
+    pil_img = Image.fromarray(rgba, mode="RGBA")
+
+    buf = io.BytesIO()
+    pil_img.save(buf, format="PNG")
+
+    return buf.getvalue(), {
         "fill_ratio": round(fill_ratio, 4),
         "confidence": round(conf, 4),
         "box": box,
@@ -304,7 +197,7 @@ async def run_segmentation(run_id: str) -> dict:
         segmented: list[dict] = []
         skipped:   list[dict] = []
 
-        for view_index, img in enumerate(run.get("images", [])):
+        for img in run.get("images", []):
             stream      = await gridfs.open_download_stream(ObjectId(img["file_id"]))
             image_bytes = await stream.read()
 
@@ -332,7 +225,6 @@ async def run_segmentation(run_id: str) -> dict:
                 detection_meta["confidence"],
             )
             segmented.append({
-                "view_index":        view_index,   # position in the capture sequence
                 "original_file_id":  img["file_id"],
                 "segmented_file_id": str(seg_file_id),
                 "filename":          seg_filename,
